@@ -29,3 +29,4 @@ Skils:
 - fastapi-testing
 - configuration-management
 - python-execution
+- execution-logging

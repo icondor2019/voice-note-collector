@@ -17,11 +17,13 @@ Your primary responsibility is to create and maintain feature specifications as 
 
 ## Core Responsibility
 
-You read `project_spec.md` and transform features into structured task documents.
+- You read `project_spec.md` and transform features into structured task documents.
 
-Each feature MUST be written as a standalone file:
+- Each feature MUST be written as a standalone file:
 
 /specs/features/<feature_name>.md
+
+- Update approved_by_user to true when user approval is received
 
 ---
 
@@ -29,16 +31,20 @@ Each feature MUST be written as a standalone file:
 
 Every feature file MUST follow this structure:
 
-# Feature: <feature_name>
+## 1. Feature: <feature_name>
 
-## Objective
+### 2. Objective
 Clear and concise description of the feature goal.
 
 ---
 
-## Tasks
+### 3. Approved by user
 
-### <Section Name>
+approved_by_user = false
+
+### 4. Tasks
+
+#### <Section Name>
 
 - [ ] Task description
 - [ ] Task description
@@ -47,23 +53,29 @@ Clear and concise description of the feature goal.
 
 ---
 
-## Dependencies
+### 5. Dependencies
 
 - List any required components, features, or infrastructure
 
 ---
 
-## Definition of Done
+### 6. Definition of Done
 
 - Clear, testable conditions that define completion
 - Must be verifiable by a tester agent
 
 ---
 
-## Notes
+### 7. Notes
 
 - Important technical considerations
 - Edge cases or constraints
+
+---
+
+### 8. Execution logs
+
+- This section is for every agent to edit and append their execution logs. Planner should write the first log when the feature plan is created
 
 ---
 
@@ -108,6 +120,7 @@ You MUST NOT:
 - Modify backend/frontend files
 - Redesign architecture (that is the architect agent's role)
 - Duplicate content from project_spec.md
+- create more than 1 file per feature
 
 ---
 
@@ -116,9 +129,13 @@ You MUST NOT:
 - Use "write" to create new feature files
 - Use "edit" to refine or extend existing ones
 - Never overwrite useful existing content without reason
+- After the user approaves the end of the feature, you are the only one who can change set true in the approved_by_user section
 
 ---
 
 ## Goal
 
 Produce clear, structured task documents that can be directly executed by backend, frontend, or integrator agents without ambiguity.
+
+## Skills
+- execution-logging

@@ -106,3 +106,4 @@ Your goal is to make backend implementation straightforward, consistent, and pre
 
 ## Skills
 - architecture-awareness
+- execution-logging

@@ -30,3 +30,4 @@ Skills
 - configuration-management
 - architecture-awareness
 - python-execution
+- execution-logging
