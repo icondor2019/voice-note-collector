@@ -23,3 +23,6 @@ Rules:
 
 Focus:
 - Clarity over design complexity
+
+Skils:
+- execution-logging

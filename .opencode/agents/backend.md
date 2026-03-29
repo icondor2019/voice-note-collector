@@ -24,6 +24,7 @@ Rules:
 - Keep functions modular and testable
 - Do not mix business logic with controllers
 - Use clear naming conventions
+- Change de spec status to IN_PROGRESS
 
 Important:
 - Respect the "active source" logic
@@ -39,3 +40,4 @@ Skills
 - configuration-management
 - architecture-awareness
 - python-execution
+- execution-logging

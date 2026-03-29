@@ -28,3 +28,4 @@ Focus:
 Skills
 - configuration-management
 - architecture-awareness
+- execution-logging
