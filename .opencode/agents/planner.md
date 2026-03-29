@@ -1,7 +1,7 @@
 ---
 description: Breaks down features into structured, executable task files
 mode: subagent
-model: anthropic/claude-sonnet-4-20250514
+model: github-copilot/gpt-5.2
 temperature: 0.2
 tools:
   write: true

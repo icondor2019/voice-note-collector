@@ -1,7 +1,7 @@
 ---
 description: Implements backend logic in FastAPI and Python
 mode: subagent
-model: anthropic/claude-sonnet-4-20250514
+model: github-copilot/gpt-5.2-codex
 temperature: 0.1
 tools:
   write: true
@@ -19,6 +19,7 @@ Responsibilities:
 - Ensure idempotency and error handling
 
 Rules:
+- You must always consult /specs/architecture/ before implementing any feature
 - Follow project structure strictly
 - Keep functions modular and testable
 - Do not mix business logic with controllers
@@ -31,3 +32,10 @@ Important:
 
 Output:
 - Clean, production-ready Python code
+
+Skills
+- fastapi-structure
+- fastapi-controller-pattern
+- configuration-management
+- architecture-awareness
+- python-execution

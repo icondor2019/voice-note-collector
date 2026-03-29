@@ -1,7 +1,7 @@
 ---
 description: Writes tests and validates system behavior
 mode: subagent
-model: anthropic/claude-sonnet-4-20250514
+model: github-copilot/gpt-5.2-codex
 temperature: 0.1
 tools:
   write: true
@@ -24,3 +24,8 @@ Focus:
 Rules:
 - Keep tests simple and focused
 - Prioritize core functionality
+
+Skils:
+- fastapi-testing
+- configuration-management
+- python-execution

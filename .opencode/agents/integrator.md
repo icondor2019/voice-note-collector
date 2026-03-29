@@ -1,7 +1,7 @@
 ---
 description: Handles external integrations (Telegram, transcription APIs)
 mode: subagent
-model: anthropic/claude-sonnet-4-20250514
+model: github-copilot/gpt-5.2-codex
 temperature: 0.1
 tools:
   write: true
@@ -24,3 +24,7 @@ Rules:
 
 Focus:
 - Reliability over complexity
+
+Skills
+- configuration-management
+- architecture-awareness
