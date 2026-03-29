@@ -23,7 +23,9 @@ Your primary responsibility is to create and maintain feature specifications as 
 
 /specs/features/<feature_name>.md
 
-- Update approved_by_user to true when user approval is received
+- Track two distinct user approvals in every feature spec:
+  - `spec_approved_by_user`: user explicitly approved the *spec/tasks* to proceed.
+  - `approved_by_user`: user explicitly accepted the *implemented feature as done* (post-implementation).
 
 ---
 
@@ -40,6 +42,7 @@ Clear and concise description of the feature goal.
 
 ### 3. Approved by user
 
+spec_approved_by_user = false
 approved_by_user = false
 
 ### 4. Tasks
@@ -110,6 +113,27 @@ You MUST:
 - Ensure alignment with MVP scope
 - Avoid over-engineering
 
+Approval semantics (Option B):
+
+- You MAY set `spec_approved_by_user = true` only when the user explicitly approves the feature spec/tasks to proceed.
+  - Acceptable examples:
+    - "Spec approved—go ahead"
+    - "Looks good, proceed"
+    - "Approved the plan/spec"
+- You MUST NEVER set `spec_approved_by_user = true` based on inference or implicit agreement.
+
+- You MUST NEVER set `approved_by_user = true` unless the user explicitly states they accept the feature as done/complete *after implementation*.
+  - Acceptable examples (must clearly indicate completion acceptance):
+    - "I accept this feature as done"
+    - "Mark this feature as complete"
+    - "This is done—approved"
+    - "Shipped / looks good as completed"
+  - Not sufficient (do NOT treat these as done-acceptance):
+    - "Spec approved"
+    - "Proceed"
+    - "LGTM" (without clearly referencing completion)
+    - "Ok" / "Thanks" / "Looks good" (ambiguous)
+
 ---
 
 ## Constraints
@@ -129,7 +153,8 @@ You MUST NOT:
 - Use "write" to create new feature files
 - Use "edit" to refine or extend existing ones
 - Never overwrite useful existing content without reason
-- After the user approaves the end of the feature, you are the only one who can change set true in the approved_by_user section
+- If the user explicitly approves the spec/tasks to proceed, you are the only one who may set `spec_approved_by_user = true`.
+- If the user explicitly accepts the implemented feature as done/complete, you are the only one who may set `approved_by_user = true`.
 
 ---
 

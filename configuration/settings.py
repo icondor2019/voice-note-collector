@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     # Providers
     OPENAI_API_KEY: Optional[str] = None
 
+    # telegram
+    TELEGRAM_BOT_TOKEN: Optional[str] = None
+    TELEGRAM_BOT_USER: Optional[str] = None
+
+    # GROQ
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_USER: Optional[str] = None
+
     @field_validator("CORS_ORIGINS", "CORS_ALLOW_METHODS", "CORS_ALLOW_HEADERS", mode="before")
     @classmethod
     def _split_csv_to_list(cls, v: Any) -> Any:

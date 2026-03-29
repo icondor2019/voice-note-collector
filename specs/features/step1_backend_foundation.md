@@ -7,6 +7,7 @@ Establish a runnable, testable FastAPI backend baseline that later steps can ext
 
 ### 3. Approved by user
 
+spec_approved_by_user = true
 approved_by_user = true
 
 ### 4. Tasks
@@ -69,3 +70,4 @@ approved_by_user = true
 ### 8. Execution logs
 
 - [2026-03-29 00:00] Agent: Planner | Status: completed | User approved; normalized spec format to required sections (1-8) without changing intent/tasks
+- [2026-03-29 00:05] Agent: Planner | Status: completed | Migrated approval semantics (Option B): preserved prior approval as spec_approved_by_user=true and reset approved_by_user=false pending done-acceptance
