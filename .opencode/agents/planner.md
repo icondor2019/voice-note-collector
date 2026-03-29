@@ -39,7 +39,6 @@ Clear and concise description of the feature goal.
 ---
 
 ### 3. Approved by user
-Every feature to be considered done MUST have this field = true. The only way to approve a feature is by explicite user confirmation. This filed is false by default.
 
 approved_by_user = false
 
