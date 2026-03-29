@@ -7,8 +7,8 @@ Implement Supabase-backed persistence for the MVP by adding repositories, servic
 
 ### 3. Approved by user
 
-spec_approved_by_user = false
-approved_by_user = false
+spec_approved_by_user = true
+approved_by_user = true
 
 ### 4. Tasks
 
@@ -183,3 +183,5 @@ approved_by_user = false
 - [2026-03-29 20:30] Agent: Backend | Status: in_progress | Updating VoiceNotesRepository _raise_on_error to allow opt-in None responses for idempotency lookup
 - [2026-03-29 21:10] Agent: Backend | Status: completed | Adjusted voice_notes_repository lookup error handling and logging per latest request
 - [2026-03-29 21:45] Agent: Tester | Status: completed | Added FastAPI TestClient coverage for sources + voice-notes endpoints with mocked services and documented failures
+
+- [2026-03-29 22:00] Agent: Planner | Status: completed | User confirmed the feature is finished; set approved_by_user=true
