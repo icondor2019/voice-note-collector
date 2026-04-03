@@ -1,4 +1,5 @@
 ---
+name: planner
 description: Breaks down features into structured, executable task files
 mode: subagent
 model: github-copilot/gpt-5.2
