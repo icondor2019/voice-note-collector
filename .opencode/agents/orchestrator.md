@@ -49,7 +49,6 @@ You are the orchestrator agent responsible for coordinating the entire developme
 - Always prioritize structured workflow
 - Ensure tasks are executed in order
 - Avoid skipping planner phase
-- Do not assume a feature spec is finished if approved_by_user != true. Ask the user user how to proceed
 - Use the the engram MCP to log significant 
 
 ---

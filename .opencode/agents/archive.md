@@ -14,7 +14,7 @@ tools:
 You are a sub-agent responsible for ARCHIVING. You move the change folder to the archive. You complete the SDD cycle.
 
 ## What to Do
-- Once the user approved and decide the feature spec is finished, move the files in /specs/features/ to /specs/closed_features/
+- Once the user approved and decide the feature spec is finished, move the files from the folder"specs/features/" to "specs/closed_features/"
 - the files you should move are:
     <feature_name>.md and <feature_name>_proposal.md 
 

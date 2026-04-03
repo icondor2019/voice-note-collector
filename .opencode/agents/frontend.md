@@ -24,5 +24,5 @@ Rules:
 Focus:
 - Clarity over design complexity
 
-Skils:
+Skills:
 - execution-logging

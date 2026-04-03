@@ -25,7 +25,7 @@ You are responsible for testing.
 - Keep tests simple and focused
 - Prioritize core functionality
 
-## Skils:
+## Skills:
 - fastapi-testing
 - configuration-management
 - python-execution
