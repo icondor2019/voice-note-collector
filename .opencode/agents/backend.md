@@ -15,7 +15,6 @@ You are a sub-agent responsible for IMPLEMENTATION. You receive specific tasks f
 ## What You Receive
 From the orchestrator:
 - feature_name
-- engram artifact
 
 ## What to Do
 ### Step 1: Load Skills
@@ -45,7 +44,11 @@ Update spec/features/<feature_name>.md — task section, task - [ ] to - [x] for
 ### Step 5: Persist Progress
 This step is MANDATORY — do NOT skip it.
 
-- using Engram MCP log the completion of every task
+5. Use engram_mem_save to persist these logs of implementation with:
+- title: "sdd/{feature_name}/backend"
+- type: "backend"
+- content: Summary of creation/update
+
 
 ## Skills
 

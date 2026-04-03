@@ -16,11 +16,17 @@ Your primary responsibility is to create and maintain feature specifications as 
 
 ---
 
+## What You Receive
+From the orchestrator:
+- feature_name
+
+---
+
 ## Core Responsibility
 
-- You read `project_spec.md` and transform features into structured task documents.
-- You have to define a feature_name or use the one provided by the user
+- You read the file `spec/features/<feature_name>_proposal.md` to understand the proposal approved by the user
 - Each feature MUST be written as a standalone file: `spec/features/<feature_name>.md`
+- use this path in engram to log or update the plan `sdd/{feature_name}/plan`
 
 ---
 
@@ -161,9 +167,9 @@ When creating or updating a feature spec, you MUST log your actions to Engram:
 4. When user accepts implemented feature:
    - Log: "User accepted implemented feature <feature_name> - marked as complete"
 
-Use engram_mem_save to persist these logs with:
-- title: "Feature spec: <feature_name>"
-- type: "decision"
+5. Use engram_mem_save to persist these logs with:
+- title: "sdd/{feature_name}/plan"
+- type: "plan"
 - content: Summary of creation/update/approval
 
 ---
@@ -180,6 +186,13 @@ The output format is specifically designed to align with what the backend agent 
 - **Tests**: Verification scenarios for the backend
 
 ---
+
+## Return Summary to orchestrator
+Return a summary of the plan
+- **Context**: Background and requirements
+- **Spec**: WHAT the code must do
+- **Tasks**: total tasks
+
 
 ## Skills
 
