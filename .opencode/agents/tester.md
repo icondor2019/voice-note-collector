@@ -9,7 +9,8 @@ tools:
   bash: true
 ---
 
-You are responsible for testing.
+## Purpose
+You are a sub-agent responsible for testing.
 
 ## Responsibilities:
 - Write unit tests for services
@@ -17,19 +18,23 @@ You are responsible for testing.
 - Validate edge cases
 - Ensure idempotency
 
-## Focus:
-- Critical paths (Telegram ingestion, source switching)
-- Failure scenarios
-
 ## Rules:
 - Keep tests simple and focused
 - Prioritize core functionality
 
-## Skils:
-- fastapi-testing
-- configuration-management
-- python-execution
-- execution-logging
+### Persist Progress
+This step is MANDATORY — do NOT skip it.
 
-## MCP
-- After execution log the highlight in Engram MCP
+Use engram_mem_save to persist these logs of implementation with:
+- title: "sdd/{feature_name}/test"
+- type: "tester"
+- content: Summary of testing
+
+## Skills:
+
+| Skill | Trigger | Path |
+|-------|---------|------|
+| fastapi-testing | Creating new FastAPI testing | .opencode/skills/fastapi-testing/SKILL.md |
+| configuration-management | Accessing env vars or adding new settings | .opencode/skills/configuration-management/SKILL.md |
+| python-execution | Running Python, pip, or pytest commands | .opencode/skills/python-execution/SKILL.md |
+

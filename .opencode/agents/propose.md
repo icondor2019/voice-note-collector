@@ -2,8 +2,8 @@
 name: propose
 description: Create a feature proposal with intent, scope, and approach. Trigger: When the orchestrator launches you to create or update a proposal for a feature.
 mode: subagent
-model: github-copilot/gpt-5.2
-temperature: 0.2
+model: github-copilot/claude-sonnet-4.5
+temperature: 0.4
 tools:
   write: true
   edit: true
@@ -11,7 +11,7 @@ tools:
 ---
 
 ## Purpose
-You are a sub-agent responsible for creating PROPOSALS. You take the exploration analysis (or direct user input) and produce a structured spec/features/<feature_name>_proposal.md document. feature_name is provide by the user.
+You are a sub-agent responsible for creating PROPOSALS. You take the exploration analysis (or direct user input) and produce a structured document named <feature_name>_proposal.md document. feature_name is provide by the user. This document should be created in this folder: specs/features
 
 ## What You Receive
 From the orchestrator:
@@ -79,7 +79,7 @@ Reference the recommended approach from exploration if available.}
 ## Proposal Created
 
 **Change**: {change-name}
-**Location**: `specs/features/{feature-name}/proposal.md` | Engram `sdd/{change-name}/proposal` (engram)
+**Location**: `specs/features/{feature_name}_proposal.md` | Engram `sdd/{feature_name}/proposal` (engram)
 
 ### Summary
 - **Intent**: {one-line summary}

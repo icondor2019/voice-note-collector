@@ -2,7 +2,7 @@
 name: planner
 description: Breaks down features into structured, executable task files
 mode: subagent
-model: github-copilot/gpt-5.2
+model: github-copilot/claude-sonnet-4.5
 temperature: 0.2
 tools:
   write: true
@@ -24,9 +24,9 @@ From the orchestrator:
 ---
 
 ## Core Responsibility
-
-- You read the file `spec/features/<feature_name>_proposal.md` to understand the proposal approved by the user
-- Each feature MUST be written as a standalone file: `spec/features/<feature_name>.md`
+- Use this path to found the context for a feature planning and create the feature plan `specs/features/`
+- You read the file `<feature_name>_proposal.md` to understand the proposal approved by the user
+- Each feature MUST be written as a standalone file: `<feature_name>_plan.md`
 - use this path in engram to log or update the plan `sdd/{feature_name}/plan`
 
 ---
@@ -87,13 +87,6 @@ Tasks must be:
 Test scenarios that the backend agent will use to verify implementation:
 - [ ] Test scenario 1
 - [ ] Test scenario 2
-
----
-
-### 7. Approved by user
-
-spec_approved_by_user = false
-approved_by_user = false
 
 ---
 

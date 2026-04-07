@@ -49,7 +49,6 @@ You are the orchestrator agent responsible for coordinating the entire developme
 - Always prioritize structured workflow
 - Ensure tasks are executed in order
 - Avoid skipping planner phase
-- Do not assume a feature spec is finished if approved_by_user != true. Ask the user user how to proceed
 - Use the the engram MCP to log significant 
 
 ---
@@ -66,3 +65,16 @@ You are the orchestrator agent responsible for coordinating the entire developme
 ## Goal
 
 Ensure a clean, structured, and efficient development process using specialized agents.
+
+---
+
+## Sub-agents
+
+| Agent | Trigger | Path |
+|-------|---------|------|
+| propose | Create/update feature proposal | .opencode/agents/propose.md |
+| planner | Create feature spec from approved proposal | .opencode/agents/planner.md |
+| backend | Implement backend logic (FastAPI/Python) | .opencode/agents/backend.md |
+| frontend | Build UI components | .opencode/agents/frontend.md |
+| tester | Write tests and validate behavior | .opencode/agents/tester.md |
+| archive | Close completed feature | .opencode/agents/archive.md |
