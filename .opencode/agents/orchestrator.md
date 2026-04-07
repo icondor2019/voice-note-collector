@@ -65,3 +65,16 @@ You are the orchestrator agent responsible for coordinating the entire developme
 ## Goal
 
 Ensure a clean, structured, and efficient development process using specialized agents.
+
+---
+
+## Sub-agents
+
+| Agent | Trigger | Path |
+|-------|---------|------|
+| propose | Create/update feature proposal | .opencode/agents/propose.md |
+| planner | Create feature spec from approved proposal | .opencode/agents/planner.md |
+| backend | Implement backend logic (FastAPI/Python) | .opencode/agents/backend.md |
+| frontend | Build UI components | .opencode/agents/frontend.md |
+| tester | Write tests and validate behavior | .opencode/agents/tester.md |
+| archive | Close completed feature | .opencode/agents/archive.md |
