@@ -10,6 +10,9 @@ from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.source_service import SourceService
 from backend.services.telegram_ingestion_service import TelegramIngestionService
+from backend.services.telegram_message_handler import TelegramMessageHandler
+from backend.services.transcription_service import TranscriptionError, TranscriptionService
+from backend.services.telegram_audio_downloader import TelegramDownloadError
 from backend.services.voice_note_service import VoiceNoteService
 
 router = APIRouter(prefix="/api/telegram", tags=["Telegram"])
@@ -53,10 +56,26 @@ def get_ingestion_service(
     return TelegramIngestionService(voice_note_service)
 
 
+def get_transcription_service() -> TranscriptionService:
+    return TranscriptionService()
+
+
+def get_message_handler(
+    ingestion_service: TelegramIngestionService = Depends(get_ingestion_service),
+    voice_note_service: VoiceNoteService = Depends(get_voice_note_service),
+    transcription_service: TranscriptionService = Depends(get_transcription_service),
+) -> TelegramMessageHandler:
+    return TelegramMessageHandler(
+        ingestion_service=ingestion_service,
+        voice_note_service=voice_note_service,
+        transcription_service=transcription_service,
+    )
+
+
 @router.post("/webhook")
 async def telegram_webhook(
     request: Request,
-    ingestion_service: TelegramIngestionService = Depends(get_ingestion_service),
+    handler: TelegramMessageHandler = Depends(get_message_handler),
 ) -> dict[str, Any]:
     try:
         payload = await request.json()
@@ -74,11 +93,16 @@ async def telegram_webhook(
 
     # Accept update payloads even if message type is unsupported.
     try:
-        result = await ingestion_service.ingest_update(payload)
+        result = await handler.handle(payload)
     except RepositoryError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to persist ingestion event",
+        )
+    except (TelegramDownloadError, TranscriptionError):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process audio message",
         )
 
     return {"status": "ok", **result}

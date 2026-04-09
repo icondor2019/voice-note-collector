@@ -5,19 +5,17 @@ Orchestrates audio download from Telegram and transcription via Groq Whisper API
 
 from __future__ import annotations
 
-import logging
 import os
 from typing import Optional
 
 import httpx
+from loguru import logger
 
 from backend.services.telegram_audio_downloader import (
     TelegramAudioDownloader,
     TelegramDownloadError,
 )
 from configuration.settings import settings
-
-logger = logging.getLogger(__name__)
 
 
 class TranscriptionError(Exception):

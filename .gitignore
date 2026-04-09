@@ -210,4 +210,5 @@ __marimo__/
 *.json
 *.jsonl
 local*
+tmp/
 closed_features/
