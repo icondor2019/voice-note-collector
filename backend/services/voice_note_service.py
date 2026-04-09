@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from loguru import logger
 
 from backend.repositories.repository_errors import DuplicateRecordError
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
@@ -37,42 +36,19 @@ class VoiceNoteService:
         audio_file_id: str,
         duration_seconds: Optional[float] = None,
     ) -> dict[str, Any]:
-        logger.bind(
-            message_id=message_id,
-            audio_file_id=audio_file_id,
-            duration_seconds=duration_seconds,
-            raw_text_length=len(raw_text) if raw_text else 0,
-            raw_text_preview=_truncate_text(raw_text),
-            clean_text_length=len(clean_text) if clean_text else 0,
-        ).debug("voice_notes.create.service.entry")
-        if not raw_text:
+        if raw_text is None:
             raise ValueError("raw_text is required")
         if not audio_file_id:
             raise ValueError("audio_file_id is required")
         if message_id is None:
             raise ValueError("message_id is required")
-        logger.bind(message_id=message_id).debug("voice_notes.idempotency.check.start")
         existing = await self._repository.get_voice_note_by_message_id(message_id)
         if existing:
-            logger.bind(
-                message_id=message_id,
-                existing_id=existing.get("id") if isinstance(existing, dict) else None,
-            ).debug("voice_notes.idempotency.hit")
             return existing
 
-        logger.bind(message_id=message_id).debug("voice_notes.source.ensure_default.start")
         active_source = await self._source_service.ensure_default_source()
-        logger.bind(
-            message_id=message_id,
-            source_id=active_source.get("id") if isinstance(active_source, dict) else None,
-            source_status=active_source.get("status") if isinstance(active_source, dict) else None,
-        ).debug("voice_notes.source.ensure_default.done")
         try:
-            logger.bind(
-                message_id=message_id,
-                source_id=active_source.get("id") if isinstance(active_source, dict) else None,
-            ).debug("voice_notes.repository.create.start")
-            return await self._repository.create_voice_note(
+            result = await self._repository.create_voice_note(
                 source_id=active_source["id"],
                 raw_text=raw_text,
                 clean_text=clean_text,
@@ -80,14 +56,10 @@ class VoiceNoteService:
                 audio_file_id=audio_file_id,
                 duration_seconds=duration_seconds,
             )
+            return result
         except DuplicateRecordError:
-            logger.bind(message_id=message_id).debug("voice_notes.idempotency.duplicate")
             existing = await self._repository.get_voice_note_by_message_id(message_id)
             if existing:
-                logger.bind(
-                    message_id=message_id,
-                    existing_id=existing.get("id") if isinstance(existing, dict) else None,
-                ).debug("voice_notes.idempotency.duplicate.returned")
                 return existing
             raise
 

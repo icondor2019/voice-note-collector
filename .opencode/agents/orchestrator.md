@@ -1,7 +1,7 @@
 ---
 description: Orchestrates agents and manages the development workflow
 mode: primary
-model: github-copilot/gpt-5.2-codex
+model: github-copilot/claude-sonnet-4.6
 temperature: 0.1
 tools:
   write: false

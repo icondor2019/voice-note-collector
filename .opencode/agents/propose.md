@@ -2,7 +2,7 @@
 name: propose
 description: Create a feature proposal with intent, scope, and approach. Trigger: When the orchestrator launches you to create or update a proposal for a feature.
 mode: subagent
-model: github-copilot/claude-sonnet-4.5
+model: github-copilot/claude-sonnet-4.6
 temperature: 0.4
 tools:
   write: true
