@@ -5,14 +5,13 @@ Downloads audio files from Telegram Bot API given a file_id.
 
 from __future__ import annotations
 
-import logging
 import os
+from pathlib import Path
 import tempfile
 from typing import Optional
 
 import httpx
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class TelegramDownloadError(Exception):
@@ -169,12 +168,16 @@ class TelegramAudioDownloader:
         Raises:
             TelegramDownloadError: If download fails.
         """
+        tmp_dir = Path(__file__).resolve().parents[2] / "tmp"
+        os.makedirs(tmp_dir, exist_ok=True)
         url = f"{self.TELEGRAM_API_BASE}/file/bot{self._token}/{file_path}"
 
         # Determine file extension from file_path
         _, ext = os.path.splitext(file_path)
         if not ext:
             ext = ".ogg"  # Default for Telegram voice messages
+        if ext == ".oga":
+            ext = ".ogg"
 
         try:
             with httpx.Client(timeout=self.DEFAULT_TIMEOUT) as client:
@@ -186,6 +189,7 @@ class TelegramAudioDownloader:
                         delete=False,
                         suffix=ext,
                         prefix="telegram_audio_",
+                        dir=tmp_dir,
                     )
 
                     try:
