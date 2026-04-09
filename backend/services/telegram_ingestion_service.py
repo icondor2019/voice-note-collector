@@ -17,7 +17,9 @@ class TelegramIngestionService:
     def __init__(self, voice_note_service: VoiceNoteService) -> None:
         self._voice_note_service = voice_note_service
 
-    async def ingest_update(self, update: dict[str, Any]) -> dict[str, Any]:
+    async def ingest_update(
+        self, update: dict[str, Any], raw_text: str = ""
+    ) -> dict[str, Any]:
         ingestion_event = self._build_ingestion_event(update)
 
         if ingestion_event["message_type"] not in SUPPORTED_MESSAGE_TYPES:
@@ -38,7 +40,7 @@ class TelegramIngestionService:
                 message_id=ingestion_event["message_id"],
                 audio_file_id=ingestion_event["telegram_file_id"],
                 duration_seconds=ingestion_event.get("duration_seconds"),
-                raw_text="",
+                raw_text=raw_text,
                 clean_text=None,
             )
         except DuplicateRecordError:
