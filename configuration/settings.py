@@ -14,6 +14,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    ENVIRONMENT: str = "dev"
+
     # Application configuration
     APP_NAME: str = "voice-note-collector"
     APP_VERSION: str = "1.0.0"

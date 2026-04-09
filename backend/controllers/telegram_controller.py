@@ -1,28 +1,56 @@
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from backend.repositories.telegram_ingestion_event_store import FileIngestionEventStore
+from backend.repositories.repository_errors import RepositoryError
+from backend.repositories.sources_repository import SourcesRepository
+from backend.repositories.supabase_client import get_supabase_client
+from backend.repositories.voice_notes_repository import VoiceNotesRepository
+from backend.services.source_service import SourceService
 from backend.services.telegram_ingestion_service import TelegramIngestionService
-
-
-logger = logging.getLogger(__name__)
+from backend.services.voice_note_service import VoiceNoteService
 
 router = APIRouter(prefix="/api/telegram", tags=["Telegram"])
 
 
-def get_event_store(file_path: Optional[Path] = None) -> FileIngestionEventStore:
-    return FileIngestionEventStore(file_path or "./data/telegram_ingestion_events.jsonl")
+async def get_supabase() -> Any:
+    return await get_supabase_client()
+
+
+def get_voice_notes_repository(
+    _: Any = Depends(get_supabase),
+) -> VoiceNotesRepository:
+    return VoiceNotesRepository()
+
+
+def get_sources_repository(
+    _: Any = Depends(get_supabase),
+) -> SourcesRepository:
+    return SourcesRepository()
+
+
+def get_source_service(
+    sources_repository: SourcesRepository = Depends(get_sources_repository),
+) -> SourceService:
+    return SourceService(repository=sources_repository)
+
+
+def get_voice_note_service(
+    voice_notes_repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
+    source_service: SourceService = Depends(get_source_service),
+) -> VoiceNoteService:
+    return VoiceNoteService(
+        repository=voice_notes_repository,
+        source_service=source_service,
+    )
 
 
 def get_ingestion_service(
-    event_store: FileIngestionEventStore = Depends(get_event_store),
+    voice_note_service: VoiceNoteService = Depends(get_voice_note_service),
 ) -> TelegramIngestionService:
-    return TelegramIngestionService(event_store)
+    return TelegramIngestionService(voice_note_service)
 
 
 @router.post("/webhook")
@@ -46,8 +74,8 @@ async def telegram_webhook(
 
     # Accept update payloads even if message type is unsupported.
     try:
-        result = ingestion_service.ingest_update(payload)
-    except OSError:
+        result = await ingestion_service.ingest_update(payload)
+    except RepositoryError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to persist ingestion event",
