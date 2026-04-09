@@ -2,7 +2,7 @@
 name: backend
 description: Implements backend logic in FastAPI and Python
 mode: subagent
-model: github-copilot/claude-opus-4.5
+model: github-copilot/gpt-5.2-codex
 temperature: 0.1
 tools:
   write: true
