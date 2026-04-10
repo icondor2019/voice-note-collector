@@ -8,7 +8,11 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from backend.repositories.repository_errors import RepositoryError, SupabaseConfigError
+from backend.repositories.sources_repository import SourcesRepository
+from backend.repositories.supabase_client import get_supabase_client
+from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.voice_note_service import VoiceNoteService
+from backend.services.source_service import SourceService
 
 
 MAX_LOG_TEXT_LENGTH = 200
@@ -33,8 +37,33 @@ class VoiceNoteCreateRequest(BaseModel):
 router = APIRouter(prefix="/api/voice-notes", tags=["Voice Notes"])
 
 
-def get_voice_note_service() -> VoiceNoteService:
-    return VoiceNoteService()
+async def get_supabase() -> Any:
+    return await get_supabase_client()
+
+
+def get_voice_notes_repository(
+    client: Any = Depends(get_supabase),
+) -> VoiceNotesRepository:
+    return VoiceNotesRepository(client=client)
+
+
+def get_sources_repository(
+    client: Any = Depends(get_supabase),
+) -> SourcesRepository:
+    return SourcesRepository(client=client)
+
+
+def get_source_service(
+    repository: SourcesRepository = Depends(get_sources_repository),
+) -> SourceService:
+    return SourceService(repository=repository)
+
+
+def get_voice_note_service(
+    repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
+    source_service: SourceService = Depends(get_source_service),
+) -> VoiceNoteService:
+    return VoiceNoteService(repository=repository, source_service=source_service)
 
 
 @router.post("/add/voice-notes", tags=["Voice Notes"])
