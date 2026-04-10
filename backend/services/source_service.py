@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import logging
+from loguru import logger
 from typing import Any, Optional
 
 from backend.repositories.repository_errors import RepositoryError
 from backend.repositories.sources_repository import SourcesRepository
-
-
-logger = logging.getLogger(__name__)
-
 
 class SourceService:
     def __init__(self, repository: Optional[SourcesRepository] = None) -> None:
