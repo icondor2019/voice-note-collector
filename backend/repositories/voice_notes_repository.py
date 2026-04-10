@@ -5,7 +5,6 @@ from typing import Any, Optional, cast
 
 
 from backend.repositories.repository_errors import DuplicateRecordError, RepositoryError
-from backend.repositories.supabase_client import get_supabase_client
 
 MAX_LOG_TEXT_LENGTH = 200
 
@@ -19,8 +18,9 @@ def _truncate_text(text: Optional[str], limit: int = MAX_LOG_TEXT_LENGTH) -> str
 
 
 class VoiceNotesRepository:
-    def __init__(self) -> None:
+    def __init__(self, client: Any) -> None:
         self._table = "voice_notes"
+        self._client = client
 
     async def create_voice_note(
         self,
@@ -31,7 +31,6 @@ class VoiceNotesRepository:
         audio_file_id: str,
         duration_seconds: Optional[float] = None,
     ) -> dict[str, Any]:
-        client = await get_supabase_client()
         payload = {
             "source_id": source_id,
             "raw_text": raw_text,
@@ -41,7 +40,7 @@ class VoiceNotesRepository:
             "duration_seconds": duration_seconds,
         }
 
-        response = await client.table(self._table).insert(payload).execute()
+        response = await self._client.table(self._table).insert(payload).execute()
 
         self._raise_on_error(response)
         record = self._single(response)
@@ -51,9 +50,8 @@ class VoiceNotesRepository:
         return cast(dict[str, Any], record)
 
     async def get_voice_note(self, note_id: str) -> Optional[dict[str, Any]]:
-        client = await get_supabase_client()
         response = (
-            await client.table(self._table)
+            await self._client.table(self._table)
             .select("*")
             .eq("id", note_id)
             .maybe_single()
@@ -64,9 +62,8 @@ class VoiceNotesRepository:
         return self._single(response)
 
     async def get_voice_note_by_message_id(self, message_id: int) -> Optional[dict[str, Any]]:
-        client = await get_supabase_client()
         response = (
-            await client.table(self._table)
+            await self._client.table(self._table)
             .select("*")
             .eq("message_id", message_id)
             .maybe_single()
@@ -84,8 +81,7 @@ class VoiceNotesRepository:
         created_after: Optional[datetime] = None,
         created_before: Optional[datetime] = None,
     ) -> list[dict[str, Any]]:
-        client = await get_supabase_client()
-        query = client.table(self._table).select("*")
+        query = self._client.table(self._table).select("*")
         if source_id:
             query = query.eq("source_id", source_id)
         if created_after:

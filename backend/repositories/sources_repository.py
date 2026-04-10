@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import logging
+from loguru import logger
 from typing import Any, Optional, cast
 
 from backend.repositories.repository_errors import RepositoryError
-from backend.repositories.supabase_client import get_supabase_client
-
-
-logger = logging.getLogger(__name__)
 
 
 class SourcesRepository:
-    def __init__(self) -> None:
+    def __init__(self, client: Any) -> None:
         self._table = "sources"
+        self._client = client
 
     async def create_source(
         self,
@@ -21,7 +18,6 @@ class SourcesRepository:
         comment: Optional[str] = None,
         status: str = "deactivated",
     ) -> dict[str, Any]:
-        client = await get_supabase_client()
         payload = {
             "source_name": source_name,
             "author": author,
@@ -29,7 +25,7 @@ class SourcesRepository:
             "status": status,
         }
         logger.info("sources.create", extra={"source_name": source_name, "status": status})
-        response = await client.table(self._table).insert(payload).execute()
+        response = await self._client.table(self._table).insert(payload).execute()
         self._raise_on_error(response)
         record = self._single(response)
         if not record:
@@ -38,32 +34,29 @@ class SourcesRepository:
         return cast(dict[str, Any], record)
 
     async def get_source(self, source_id: str) -> Optional[dict[str, Any]]:
-        client = await get_supabase_client()
         response = (
-            await client.table(self._table)
+            await self._client.table(self._table)
             .select("*")
             .eq("id", source_id)
             .maybe_single()
             .execute()
         )
-        self._raise_on_error(response)
+        self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
     async def get_source_by_name(self, source_name: str) -> Optional[dict[str, Any]]:
-        client = await get_supabase_client()
         response = (
-            await client.table(self._table)
+            await self._client.table(self._table)
             .select("*")
             .eq("source_name", source_name)
             .maybe_single()
             .execute()
         )
-        self._raise_on_error(response)
+        self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
     async def list_sources(self, status: Optional[str] = None) -> list[dict[str, Any]]:
-        client = await get_supabase_client()
-        query = client.table(self._table).select("*")
+        query = self._client.table(self._table).select("*")
         if status:
             query = query.eq("status", status)
         response = await query.order("created_at", desc=True).execute()
@@ -71,38 +64,42 @@ class SourcesRepository:
         return self._list(response)
 
     async def deactivate_all_sources(self) -> int:
-        client = await get_supabase_client()
-        response = await client.table(self._table).update({"status": "deactivated"}).execute()
+        response = (
+            await self._client.table(self._table)
+            .update({"status": "deactivated"})
+            .in_("status", ["active", "deactivated"])
+            .execute()
+        )
         self._raise_on_error(response)
         data = self._list(response)
         return len(data)
 
     async def activate_source(self, source_id: str) -> Optional[dict[str, Any]]:
-        client = await get_supabase_client()
         response = (
-            await client.table(self._table)
+            await self._client.table(self._table)
             .update({"status": "active"})
             .eq("id", source_id)
             .execute()
         )
-        self._raise_on_error(response)
+        self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
     async def get_active_source(self) -> Optional[dict[str, Any]]:
-        client = await get_supabase_client()
         response = (
-            await client.table(self._table)
+            await self._client.table(self._table)
             .select("*")
             .eq("status", "active")
             .maybe_single()
             .execute()
         )
-        self._raise_on_error(response)
+        self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
     @staticmethod
-    def _raise_on_error(response: Any) -> None:
+    def _raise_on_error(response: Any, allow_none_response: bool = False) -> None:
         if response is None:
+            if allow_none_response:
+                return
             raise RepositoryError("Supabase returned no response")
         error = getattr(response, "error", None)
         if error:

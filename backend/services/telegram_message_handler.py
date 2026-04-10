@@ -3,6 +3,7 @@
 from loguru import logger
 
 from backend.repositories.repository_errors import DuplicateRecordError
+from backend.services.telegram_command_handler import TelegramCommandHandler
 from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.transcription_service import TranscriptionService
 from backend.services.voice_note_service import VoiceNoteService
@@ -16,14 +17,22 @@ class TelegramMessageHandler:
         ingestion_service: TelegramIngestionService,
         voice_note_service: VoiceNoteService,
         transcription_service: TranscriptionService,
+        command_handler: TelegramCommandHandler,
     ) -> None:
         self._ingestion_service = ingestion_service
         self._voice_note_service = voice_note_service
         self._transcription_service = transcription_service
+        self._command_handler = command_handler
 
     async def handle(self, update: dict) -> dict:
         event = self._ingestion_service._build_ingestion_event(update)
         message_type = event["message_type"]
+
+        if message_type == "text":
+            chat_id = update["message"]["chat"]["id"]
+            text = update["message"]["text"]
+            await self._command_handler.handle_text(text, chat_id)
+            return {"outcome": "command", "message_type": "text"}
 
         if message_type not in AUDIO_TYPES:
             return {"outcome": "ignored", "message_type": message_type}
