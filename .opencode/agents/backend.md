@@ -60,3 +60,4 @@ This step is MANDATORY — do NOT skip it.
 | configuration-management | Accessing env vars or adding new settings | .opencode/skills/configuration-management/SKILL.md |
 | architecture-awareness | Making architectural decisions or checking existing patterns | .opencode/skills/architecture-awareness/SKILL.md |
 | python-execution | Running Python, pip, or pytest commands | .opencode/skills/python-execution/SKILL.md |
+| api-security | Adding or reviewing any API endpoint security (auth, secrets, guards) | .opencode/skills/api-security/SKILL.md |
