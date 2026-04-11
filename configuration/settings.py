@@ -30,12 +30,12 @@ class Settings(BaseSettings):
     SUPABASE_KEY: Optional[str] = None
 
     # JWT
-    SECRET_KEY: str = "your-secret-key-change-in-production"
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     # CORS
-    CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
+    CORS_ORIGINS: list[str] = Field(default_factory=list)
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: list[str] = Field(default_factory=lambda: ["*"])
     CORS_ALLOW_HEADERS: list[str] = Field(default_factory=lambda: ["*"])
@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_BOT_USER: Optional[str] = None
+    TELEGRAM_WEBHOOK_SECRET: Optional[str] = None
+
+    # Security
+    API_KEY: Optional[str] = None
 
     # GROQ
     GROQ_API_KEY: Optional[str] = None
@@ -78,6 +82,14 @@ class Settings(BaseSettings):
             "SUPABASE_KEY",
             "SECRET_KEY",
         ]
+
+        if self.ENVIRONMENT == "prod":
+            required_vars.extend(
+                [
+                    "TELEGRAM_WEBHOOK_SECRET",
+                    "API_KEY",
+                ]
+            )
 
         missing_vars: list[str] = []
         for var in required_vars:

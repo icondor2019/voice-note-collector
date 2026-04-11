@@ -13,6 +13,7 @@ from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.voice_note_service import VoiceNoteService
 from backend.services.source_service import SourceService
+from backend.utils.security import verify_api_key
 
 
 MAX_LOG_TEXT_LENGTH = 200
@@ -34,7 +35,11 @@ class VoiceNoteCreateRequest(BaseModel):
     duration_seconds: Optional[float] = None
 
 
-router = APIRouter(prefix="/api/voice-notes", tags=["Voice Notes"])
+router = APIRouter(
+    prefix="/api/voice-notes",
+    tags=["Voice Notes"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 async def get_supabase() -> Any:

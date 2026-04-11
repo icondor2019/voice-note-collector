@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from backend.repositories.repository_errors import RepositoryError, SupabaseConfigError
 from backend.repositories.sources_repository import SourcesRepository
 from backend.repositories.supabase_client import get_supabase_client
 from backend.services.source_service import SourceService
+from backend.utils.security import verify_api_key
 
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/api/sources", tags=["Sources"])
+router = APIRouter(
+    prefix="/api/sources",
+    tags=["Sources"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 class SourceCreateRequest(BaseModel):
