@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 
 from backend.repositories.repository_errors import RepositoryError
+from backend.utils.security import verify_telegram_secret
 from backend.repositories.sources_repository import SourcesRepository
 from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
@@ -89,7 +90,7 @@ def get_message_handler(
     )
 
 
-@router.post("/webhook")
+@router.post("/webhook", dependencies=[Depends(verify_telegram_secret)])
 async def telegram_webhook(
     request: Request,
     handler: TelegramMessageHandler = Depends(get_message_handler),
