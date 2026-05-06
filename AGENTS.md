@@ -33,3 +33,8 @@ Multiple skills can apply simultaneously
 | architecture-awareness | Making architectural decisions or checking existing patterns | .opencode/skills/architecture-awareness/SKILL.md |
 | python-execution | Running Python, pip, or pytest commands | .opencode/skills/python-execution/SKILL.md |
 | execution-logging | Logging agent actions in feature specs | .opencode/skills/execution-logging/SKILL.md |
+
+## Tools
+| Tool | Trigger | Path |
+|------|---------|------|
+| engram | Always check engram MCP when starting a fresh session or when needing to recall past interactions | MCP engram |
