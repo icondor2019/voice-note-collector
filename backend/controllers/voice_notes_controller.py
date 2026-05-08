@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from backend.repositories.repository_errors import RepositoryError, SupabaseConfigError
 from backend.repositories.sources_repository import SourcesRepository
 from backend.repositories.supabase_client import get_supabase_client
+from backend.repositories.voice_note_details_repository import VoiceNoteDetailsRepository
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.voice_note_service import VoiceNoteService
 from backend.services.source_service import SourceService
@@ -52,6 +53,12 @@ def get_voice_notes_repository(
     return VoiceNotesRepository(client=client)
 
 
+def get_voice_note_details_repository(
+    client: Any = Depends(get_supabase),
+) -> VoiceNoteDetailsRepository:
+    return VoiceNoteDetailsRepository(client=client)
+
+
 def get_sources_repository(
     client: Any = Depends(get_supabase),
 ) -> SourcesRepository:
@@ -67,8 +74,15 @@ def get_source_service(
 def get_voice_note_service(
     repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
     source_service: SourceService = Depends(get_source_service),
+    details_repository: VoiceNoteDetailsRepository = Depends(
+        get_voice_note_details_repository
+    ),
 ) -> VoiceNoteService:
-    return VoiceNoteService(repository=repository, source_service=source_service)
+    return VoiceNoteService(
+        repository=repository,
+        source_service=source_service,
+        details_repository=details_repository,
+    )
 
 
 @router.post("/add/voice-notes", tags=["Voice Notes"])

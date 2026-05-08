@@ -102,6 +102,25 @@ Examples:
 
 ---
 
+### Table: labels
+
+* id (SERIAL, primary key)
+* label (TEXT, unique, lowercase, max 64 chars)
+* created_at (TIMESTAMP)
+
+---
+
+### Table: voice_note_details
+
+* voice_note_uuid (UUID, primary key, foreign key → voice_notes.id)
+* title (TEXT, optional)
+* status (TEXT, default "created")
+* label_ids (INTEGER[], default [])
+* created_at (TIMESTAMP)
+* updated_at (TIMESTAMP)
+
+---
+
 ## 5. System Flow
 
 ### 5.1 Ingestion Flow
