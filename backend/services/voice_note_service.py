@@ -4,7 +4,10 @@ from datetime import datetime
 from typing import Any, Optional
 
 
+from loguru import logger
+
 from backend.repositories.repository_errors import DuplicateRecordError
+from backend.repositories.voice_note_details_repository import VoiceNoteDetailsRepository
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.source_service import SourceService
 
@@ -24,9 +27,11 @@ class VoiceNoteService:
         self,
         repository: Optional[VoiceNotesRepository] = None,
         source_service: Optional[SourceService] = None,
+        details_repository: Optional[VoiceNoteDetailsRepository] = None,
     ) -> None:
         self._repository = repository or VoiceNotesRepository()
         self._source_service = source_service or SourceService()
+        self._details_repository = details_repository
 
     async def create_voice_note_idempotent(
         self,
@@ -56,6 +61,14 @@ class VoiceNoteService:
                 audio_file_id=audio_file_id,
                 duration_seconds=duration_seconds,
             )
+            if self._details_repository:
+                try:
+                    await self._details_repository.create_details(result["id"])
+                except Exception as exc:
+                    logger.error(
+                        "voice_note_details.create.failed",
+                        extra={"note_id": result["id"], "error": str(exc)},
+                    )
             return result
         except DuplicateRecordError:
             existing = await self._repository.get_voice_note_by_message_id(message_id)

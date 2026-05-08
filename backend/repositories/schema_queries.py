@@ -33,3 +33,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS sources_one_active_idx
 ON sources (status)
 WHERE status = 'active';
 """
+
+# Labels table creation query
+CREATE_LABELS_TABLE_QUERY = """
+CREATE TABLE IF NOT EXISTS labels (
+    id SERIAL PRIMARY KEY,
+    label TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (label = LOWER(label) AND LENGTH(label) <= 64)
+);
+"""
+
+# Voice note details table creation query
+CREATE_VOICE_NOTE_DETAILS_TABLE_QUERY = """
+CREATE TABLE IF NOT EXISTS voice_note_details (
+    voice_note_uuid UUID PRIMARY KEY REFERENCES voice_notes(id) ON DELETE CASCADE,
+    title TEXT,
+    status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'enriched', 'reviewed')),
+    label_ids INTEGER[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
