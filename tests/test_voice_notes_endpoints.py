@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.controllers.voice_notes_controller import get_voice_note_service
 from backend.repositories.repository_errors import RepositoryError
+from configuration.settings import settings
 from main import app
 
 
@@ -80,6 +81,11 @@ class StubVoiceNoteService:
 
 
 @pytest.fixture
+def disable_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "API_KEY", None)
+
+
+@pytest.fixture
 def voice_note_service_override():
     stub = StubVoiceNoteService()
 
@@ -92,7 +98,11 @@ def voice_note_service_override():
 
 
 class TestVoiceNoteEndpoints:
-    def test_list_voice_notes_forwards_filters(self, voice_note_service_override: StubVoiceNoteService) -> None:
+    def test_list_voice_notes_forwards_filters(
+        self,
+        voice_note_service_override: StubVoiceNoteService,
+        disable_api_key: None,
+    ) -> None:
         voice_note_service_override.list_result = [
             {"id": "note-1", "source_id": "source-1"},
         ]
@@ -118,7 +128,11 @@ class TestVoiceNoteEndpoints:
             "created_before": None,
         }
 
-    def test_get_voice_note_returns_404_when_missing(self, voice_note_service_override: StubVoiceNoteService) -> None:
+    def test_get_voice_note_returns_404_when_missing(
+        self,
+        voice_note_service_override: StubVoiceNoteService,
+        disable_api_key: None,
+    ) -> None:
         voice_note_service_override.get_result = None
         client = TestClient(app)
 
@@ -128,7 +142,11 @@ class TestVoiceNoteEndpoints:
         assert response.json()["detail"] == "Voice note not found"
         assert voice_note_service_override.get_note_id == "note-404"
 
-    def test_get_voice_note_returns_payload(self, voice_note_service_override: StubVoiceNoteService) -> None:
+    def test_get_voice_note_returns_payload(
+        self,
+        voice_note_service_override: StubVoiceNoteService,
+        disable_api_key: None,
+    ) -> None:
         voice_note_service_override.get_result = {
             "id": "note-1",
             "raw_text": "Hello",
@@ -140,7 +158,11 @@ class TestVoiceNoteEndpoints:
         assert response.status_code == 200
         assert response.json() == voice_note_service_override.get_result
 
-    def test_create_voice_note_returns_payload(self, voice_note_service_override: StubVoiceNoteService) -> None:
+    def test_create_voice_note_returns_payload(
+        self,
+        voice_note_service_override: StubVoiceNoteService,
+        disable_api_key: None,
+    ) -> None:
         voice_note_service_override.create_result = {
             "id": "note-1",
             "raw_text": "Hello",
@@ -172,6 +194,7 @@ class TestVoiceNoteEndpoints:
     def test_create_voice_note_returns_503_on_repository_error(
         self,
         voice_note_service_override: StubVoiceNoteService,
+        disable_api_key: None,
     ) -> None:
         voice_note_service_override.raise_on_create = RepositoryError("down")
         client = TestClient(app)

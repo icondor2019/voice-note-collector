@@ -10,12 +10,18 @@ from backend.repositories.repository_errors import RepositoryError
 from backend.services.telegram_audio_downloader import TelegramDownloadError
 from backend.services.telegram_message_handler import TelegramMessageHandler
 from backend.services.transcription_service import TranscriptionError
+from configuration.settings import settings
 from main import app
 
 
 def _load_fixture(name: str) -> dict:
     fixture_path = Path(__file__).parent / "fixtures" / "telegram" / name
     return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def disable_telegram_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "TELEGRAM_WEBHOOK_SECRET", None)
 
 
 @pytest.fixture
@@ -26,7 +32,10 @@ def mock_message_handler() -> TelegramMessageHandler:
 
 
 @pytest.fixture
-def client(mock_message_handler: TelegramMessageHandler) -> TestClient:
+def client(
+    mock_message_handler: TelegramMessageHandler,
+    disable_telegram_secret: None,
+) -> TestClient:
     app.dependency_overrides[get_message_handler] = lambda: mock_message_handler
     yield TestClient(app)
     app.dependency_overrides.clear()

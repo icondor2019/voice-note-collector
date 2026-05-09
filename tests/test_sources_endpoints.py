@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from backend.controllers.sources_controller import get_source_service
 from backend.repositories.repository_errors import RepositoryError
+from configuration.settings import settings
 from main import app
 
 
@@ -71,6 +72,11 @@ class StubSourceService:
 
 
 @pytest.fixture
+def disable_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "API_KEY", None)
+
+
+@pytest.fixture
 def source_service_override():
     stub = StubSourceService()
 
@@ -83,7 +89,11 @@ def source_service_override():
 
 
 class TestSourcesEndpoints:
-    def test_create_source_returns_created_payload(self, source_service_override: StubSourceService) -> None:
+    def test_create_source_returns_created_payload(
+        self,
+        source_service_override: StubSourceService,
+        disable_api_key: None,
+    ) -> None:
         source_service_override.create_result = {
             "id": "source-1",
             "source_name": "Daily",
@@ -110,7 +120,11 @@ class TestSourcesEndpoints:
             "activate": False,
         }
 
-    def test_create_source_returns_503_on_repository_error(self, source_service_override: StubSourceService) -> None:
+    def test_create_source_returns_503_on_repository_error(
+        self,
+        source_service_override: StubSourceService,
+        disable_api_key: None,
+    ) -> None:
         source_service_override.raise_on_create = RepositoryError("down")
         client = TestClient(app)
 
@@ -122,7 +136,11 @@ class TestSourcesEndpoints:
         assert response.status_code == 503
         assert response.json()["detail"] == "Supabase unavailable"
 
-    def test_list_sources_uses_status_filter(self, source_service_override: StubSourceService) -> None:
+    def test_list_sources_uses_status_filter(
+        self,
+        source_service_override: StubSourceService,
+        disable_api_key: None,
+    ) -> None:
         source_service_override.list_result = [
             {"id": "source-1", "status": "active"},
         ]
@@ -134,7 +152,11 @@ class TestSourcesEndpoints:
         assert response.json() == source_service_override.list_result
         assert source_service_override.list_status == "active"
 
-    def test_get_active_source_returns_404_when_missing(self, source_service_override: StubSourceService) -> None:
+    def test_get_active_source_returns_404_when_missing(
+        self,
+        source_service_override: StubSourceService,
+        disable_api_key: None,
+    ) -> None:
         source_service_override.active_result = None
         client = TestClient(app)
 
@@ -143,7 +165,11 @@ class TestSourcesEndpoints:
         assert response.status_code == 404
         assert response.json()["detail"] == "Active source not found"
 
-    def test_activate_source_returns_404_when_missing(self, source_service_override: StubSourceService) -> None:
+    def test_activate_source_returns_404_when_missing(
+        self,
+        source_service_override: StubSourceService,
+        disable_api_key: None,
+    ) -> None:
         source_service_override.activate_id_result = None
         client = TestClient(app)
 
@@ -153,7 +179,11 @@ class TestSourcesEndpoints:
         assert response.json()["detail"] == "Source not found"
         assert source_service_override.activated_id == "source-404"
 
-    def test_activate_source_by_name_returns_payload(self, source_service_override: StubSourceService) -> None:
+    def test_activate_source_by_name_returns_payload(
+        self,
+        source_service_override: StubSourceService,
+        disable_api_key: None,
+    ) -> None:
         source_service_override.activate_name_result = {
             "id": "source-2",
             "source_name": "Ideas",

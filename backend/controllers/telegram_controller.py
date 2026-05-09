@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 
+from backend.repositories.labels_repository import LabelsRepository
 from backend.repositories.repository_errors import RepositoryError
 from backend.utils.security import verify_telegram_secret
 from backend.repositories.sources_repository import SourcesRepository
@@ -46,6 +47,12 @@ def get_sources_repository(
     return SourcesRepository(client=client)
 
 
+def get_labels_repository(
+    client: Any = Depends(get_supabase),
+) -> LabelsRepository:
+    return LabelsRepository(client=client)
+
+
 def get_source_service(
     sources_repository: SourcesRepository = Depends(get_sources_repository),
 ) -> SourceService:
@@ -83,8 +90,13 @@ def get_telegram_bot_client() -> TelegramBotClient:
 def get_command_handler(
     source_service: SourceService = Depends(get_source_service),
     bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
+    labels_repository: LabelsRepository = Depends(get_labels_repository),
 ) -> TelegramCommandHandler:
-    return TelegramCommandHandler(source_service=source_service, bot_client=bot_client)
+    return TelegramCommandHandler(
+        source_service=source_service,
+        bot_client=bot_client,
+        labels_repository=labels_repository,
+    )
 
 
 def get_message_handler(
