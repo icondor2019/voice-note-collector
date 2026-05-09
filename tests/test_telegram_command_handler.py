@@ -49,7 +49,8 @@ async def test_create_success() -> None:
     source_service = AsyncMock()
     source_service._repository.get_source_by_name = AsyncMock(return_value=None)
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/create my new source", chat_id=123)
 
@@ -63,7 +64,8 @@ async def test_create_already_exists() -> None:
     source_service = AsyncMock()
     source_service._repository.get_source_by_name = AsyncMock(return_value={"id": "1"})
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/create my new source", chat_id=123)
 
@@ -76,7 +78,8 @@ async def test_create_already_exists() -> None:
 async def test_create_invalid_name() -> None:
     source_service = AsyncMock()
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/create source", chat_id=123)
 
@@ -89,7 +92,8 @@ async def test_switch_success() -> None:
     source_service = AsyncMock()
     source_service._repository.get_source_by_name = AsyncMock(return_value={"id": "1"})
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/switch my new source", chat_id=123)
 
@@ -102,7 +106,8 @@ async def test_switch_not_found() -> None:
     source_service = AsyncMock()
     source_service._repository.get_source_by_name = AsyncMock(return_value=None)
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/switch my new source", chat_id=123)
 
@@ -114,7 +119,8 @@ async def test_switch_not_found() -> None:
 async def test_switch_invalid_name() -> None:
     source_service = AsyncMock()
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/switch", chat_id=123)
 
@@ -126,7 +132,8 @@ async def test_default_activates_default_source() -> None:
     source_service = AsyncMock()
     source_service._repository.get_source_by_name = AsyncMock(return_value={"id": "default"})
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/default", chat_id=123)
 
@@ -140,7 +147,8 @@ async def test_current_returns_active_source_name() -> None:
     source_service = AsyncMock()
     source_service.get_active_source = AsyncMock(return_value={"source_name": "my-source"})
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/current", chat_id=123)
 
@@ -153,7 +161,8 @@ async def test_current_no_active_source() -> None:
     source_service = AsyncMock()
     source_service.get_active_source = AsyncMock(return_value=None)
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/current", chat_id=123)
 
@@ -170,7 +179,8 @@ async def test_sources_lists_all() -> None:
         ]
     )
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/sources", chat_id=123)
 
@@ -186,7 +196,8 @@ async def test_sources_empty() -> None:
     source_service = AsyncMock()
     source_service.list_sources = AsyncMock(return_value=[])
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/sources", chat_id=123)
 
@@ -197,7 +208,8 @@ async def test_sources_empty() -> None:
 async def test_non_command_text() -> None:
     source_service = AsyncMock()
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("hello there", chat_id=123)
 
@@ -209,7 +221,8 @@ async def test_bot_client_called_with_correct_chat_id() -> None:
     source_service = AsyncMock()
     source_service.get_active_source = AsyncMock(return_value=None)
     bot_client = AsyncMock()
-    handler = TelegramCommandHandler(source_service, bot_client)
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(source_service, bot_client, labels_repository)
 
     reply = await handler.handle_text("/current", chat_id=456)
 

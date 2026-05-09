@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import re
+
 from loguru import logger
 
+from backend.repositories.labels_repository import LabelsRepository
+from backend.repositories.repository_errors import RepositoryError
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.utils.slug import slugify, validate_slug_input
@@ -17,12 +21,21 @@ SOURCES_HEADER = "📂 Your sources:\n"
 SOURCES_EMPTY = "📂 No sources found. Use /create <name> to get started."
 INVALID_NAME = "❌ Source name must be 2–4 words, no special characters."
 UNKNOWN_TEXT = "🤖 Send voice notes to capture ideas. Use /sources to manage sources."
+LABEL_SUCCESS = '✅ Label "{name}" created.'
+LABEL_DUPLICATE = '❌ Label "{name}" already exists.'
+LABEL_INVALID = "❌ Label name is invalid."
 
 
 class TelegramCommandHandler:
-    def __init__(self, source_service: SourceService, bot_client: TelegramBotClient) -> None:
+    def __init__(
+        self,
+        source_service: SourceService,
+        bot_client: TelegramBotClient,
+        labels_repository: LabelsRepository,
+    ) -> None:
         self._source_service = source_service
         self._bot_client = bot_client
+        self._labels_repository = labels_repository
 
     def _parse_command(self, text: str) -> tuple[str, str]:
         normalized = text.strip()
@@ -46,6 +59,8 @@ class TelegramCommandHandler:
             reply = await self._handle_current()
         elif command == "/sources":
             reply = await self._handle_sources()
+        elif command == "/label":
+            reply = await self._handle_label(argument)
         else:
             reply = self._handle_unknown_text()
 
@@ -107,6 +122,29 @@ class TelegramCommandHandler:
             marker = "●" if source.get("status") == "active" else "○"
             lines.append(f"{marker} {source.get('source_name')}")
         return SOURCES_HEADER + "\n".join(lines)
+
+    async def _handle_label(self, argument: str) -> str:
+        name = argument.strip().lower()
+        if not name:
+            return LABEL_INVALID
+        if len(name) > 64:
+            return LABEL_INVALID
+        if not re.match(r"^[a-z0-9 _-]+$", name):
+            return LABEL_INVALID
+
+        existing = await self._labels_repository.get_label_by_name(name)
+        if existing:
+            return LABEL_DUPLICATE.format(name=name)
+
+        try:
+            await self._labels_repository.create_label(name)
+        except RepositoryError as exc:
+            if "unique" in str(exc).lower():
+                return LABEL_DUPLICATE.format(name=name)
+            raise
+
+        logger.info("telegram.command.label", extra={"name": name})
+        return LABEL_SUCCESS.format(name=name)
 
     def _handle_unknown_text(self) -> str:
         return UNKNOWN_TEXT
