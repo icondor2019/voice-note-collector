@@ -59,6 +59,45 @@ class VoiceNoteDetailsRepository:
         self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
+    async def get_pending_notes_with_source(
+        self, source_id_filter: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        query = (
+            self._client.table(self._table)
+            .select("*, voice_notes(source_id, raw_text)")
+            .eq("status", NoteStatus.CREATED.value)
+        )
+        if source_id_filter:
+            query = query.eq("voice_notes.source_id", source_id_filter)
+        response = await query.execute()
+        self._raise_on_error(response)
+        records = self._list(response)
+        flattened: list[dict[str, Any]] = []
+        for record in records:
+            nested = record.pop("voice_notes", None) or {}
+            record["source_id"] = nested.get("source_id")
+            record["raw_text"] = nested.get("raw_text")
+            flattened.append(record)
+        return flattened
+
+    async def update_enrichment(
+        self, voice_note_uuid: str, title: str, label_ids: list[int]
+    ) -> Optional[dict[str, Any]]:
+        payload = {
+            "title": title,
+            "label_ids": label_ids,
+            "status": NoteStatus.ENRICHED.value,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        response = (
+            await self._client.table(self._table)
+            .update(payload)
+            .eq("voice_note_uuid", voice_note_uuid)
+            .execute()
+        )
+        self._raise_on_error(response, allow_none_response=True)
+        return self._single(response)
+
     async def add_label_id(self, voice_note_uuid: str, label_id: int) -> Optional[dict[str, Any]]:
         details = await self.get_details(voice_note_uuid)
         if not details:
