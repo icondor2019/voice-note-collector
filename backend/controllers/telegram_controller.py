@@ -104,12 +104,14 @@ def get_message_handler(
     voice_note_service: VoiceNoteService = Depends(get_voice_note_service),
     transcription_service: TranscriptionService = Depends(get_transcription_service),
     command_handler: TelegramCommandHandler = Depends(get_command_handler),
+    bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
 ) -> TelegramMessageHandler:
     return TelegramMessageHandler(
         ingestion_service=ingestion_service,
         voice_note_service=voice_note_service,
         transcription_service=transcription_service,
         command_handler=command_handler,
+        bot_client=bot_client,
     )
 
 
