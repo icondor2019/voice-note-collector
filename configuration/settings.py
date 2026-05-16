@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_BOT_USER: Optional[str] = None
     TELEGRAM_WEBHOOK_SECRET: Optional[str] = None
+    TELEGRAM_NOTIFY_ON_TRANSCRIPTION: bool = True
 
     # Security
     API_KEY: Optional[str] = None

@@ -36,7 +36,7 @@ class TelegramIngestionService:
             return {"outcome": "ignored", "message_type": ingestion_event["message_type"]}
 
         try:
-            await self._voice_note_service.create_voice_note_idempotent(
+            voice_note = await self._voice_note_service.create_voice_note_idempotent(
                 message_id=ingestion_event["message_id"],
                 audio_file_id=ingestion_event["telegram_file_id"],
                 duration_seconds=ingestion_event.get("duration_seconds"),
@@ -46,7 +46,11 @@ class TelegramIngestionService:
         except DuplicateRecordError:
             return {"outcome": "duplicate", "message_type": ingestion_event["message_type"]}
 
-        return {"outcome": "stored", "message_type": ingestion_event["message_type"]}
+        return {
+            "outcome": "stored",
+            "message_type": ingestion_event["message_type"],
+            "voice_note_id": voice_note.get("id") if isinstance(voice_note, dict) else None,
+        }
 
     def _build_ingestion_event(self, update: dict[str, Any]) -> dict[str, Any]:
         message: Optional[dict[str, Any]] = update.get("message")
