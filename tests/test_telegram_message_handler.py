@@ -52,6 +52,7 @@ def _build_handler(
                 "outcome": "stored",
                 "message_type": event["message_type"],
                 "voice_note_id": "note-123",
+                "source_name": "my-source",
             }
         )
     else:
@@ -92,7 +93,7 @@ async def test_success_notification_includes_preview() -> None:
 
     result = await handler.handle({})
 
-    expected_message = f"✅ Note saved!\n📝 {raw_text}"
+    expected_message = f"✅ Note saved!\n📂 Source: my-source\n📝 {raw_text}"
     bot_client.send_message.assert_awaited_once_with(321, expected_message)
     assert result == {"outcome": "stored", "message_type": "voice"}
 
@@ -106,8 +107,28 @@ async def test_success_notification_truncates_preview_to_100_chars() -> None:
     await handler.handle({})
 
     expected_preview = raw_text[:100]
-    expected_message = f"✅ Note saved!\n📝 {expected_preview}..."
+    expected_message = f"✅ Note saved!\n📂 Source: my-source\n📝 {expected_preview}..."
     bot_client.send_message.assert_awaited_once_with(123, expected_message)
+
+
+@pytest.mark.anyio
+async def test_success_notification_without_source_name() -> None:
+    event = _build_event(chat_id=456)
+    raw_text = "No source"
+    ingest_result = {
+        "outcome": "stored",
+        "message_type": event["message_type"],
+        "voice_note_id": "note-999",
+        "source_name": None,
+    }
+    handler, _, _, _, bot_client = _build_handler(
+        event, raw_text=raw_text, ingest_result=ingest_result
+    )
+
+    await handler.handle({})
+
+    expected_message = f"✅ Note saved!\n📝 {raw_text}"
+    bot_client.send_message.assert_awaited_once_with(456, expected_message)
 
 
 @pytest.mark.anyio

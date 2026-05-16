@@ -50,6 +50,7 @@ class TelegramIngestionService:
             "outcome": "stored",
             "message_type": ingestion_event["message_type"],
             "voice_note_id": voice_note.get("id") if isinstance(voice_note, dict) else None,
+            "source_name": voice_note.get("source_name") if isinstance(voice_note, dict) else None,
         }
 
     def _build_ingestion_event(self, update: dict[str, Any]) -> dict[str, Any]:

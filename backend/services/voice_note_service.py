@@ -49,6 +49,8 @@ class VoiceNoteService:
             raise ValueError("message_id is required")
         existing = await self._repository.get_voice_note_by_message_id(message_id)
         if existing:
+            if isinstance(existing, dict):
+                existing["source_name"] = existing.get("source_name")
             return existing
 
         active_source = await self._source_service.ensure_default_source()
@@ -61,6 +63,7 @@ class VoiceNoteService:
                 audio_file_id=audio_file_id,
                 duration_seconds=duration_seconds,
             )
+            result["source_name"] = active_source.get("source_name") or active_source.get("name")
             if self._details_repository:
                 try:
                     await self._details_repository.create_details(result["id"])
@@ -73,6 +76,8 @@ class VoiceNoteService:
         except DuplicateRecordError:
             existing = await self._repository.get_voice_note_by_message_id(message_id)
             if existing:
+                if isinstance(existing, dict):
+                    existing["source_name"] = existing.get("source_name")
                 return existing
             raise
 

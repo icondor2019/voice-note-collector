@@ -90,5 +90,5 @@ class TestVoiceNoteService:
             duration_seconds=None,
         )
 
-        assert result == {"id": "note-1"}
+        assert result == {"id": "note-1", "source_name": None}
         assert details_repo.created_for == []
