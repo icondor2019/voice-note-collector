@@ -1,6 +1,6 @@
 ---
 name: archive
-description: Archive a completed feature. Trigger when the orchestrator launches you to archive a feature after implementation and verification.
+description: Archive a completed feature. Trigger when the orchestrator launches you to archive a feature after implementation and verification. Never called without explicit instruction from the user
 mode: subagent
 model: github-copilot/gpt-5.2-codex
 temperature: 0.2
