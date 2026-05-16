@@ -28,6 +28,7 @@ Before writing ANY code:
 - Read the design section — understand HOW to structure the code
 - Read the task - understand the need changes required
 - Read existing code in affected files — understand current patterns
+- Ignore the section project_spec.md Alignment, it is for the planner agent, not for you.
 
 ### Step 3: implement Tasks
 FOR EACH TASK:
@@ -42,13 +43,15 @@ FOR EACH TASK:
 ### Step 4: Mark Tasks Complete
 Update spec/features/<feature_name>_plan.md — task section, task - [ ] to - [x] for completed tasks
 
-### Step 5: Persist Progress
+### Step 5: Persist Progress in Engram MCP
 This step is MANDATORY — do NOT skip it.
 
-5. Use engram_mem_save to persist these logs of implementation with:
+Use engram_mem_save to persist these logs of implementation with:
 - title: "sdd/{feature_name}/backend"
 - type: "backend"
-- content: Summary of creation/update
+- content: Summary of what you implemented, any issues faced, and any deviations from the original plan. This should be a concise report that captures the essence of your implementation work for this feature.
+
+You MUST check if there is an existing log title for "sdd/{feature_name}/backend" before saving. If there is, append or update it with new information about the latest implementation progress. This way, you maintain a continuous record of the backend implementation process for this feature in Engram.
 
 
 ## Skills

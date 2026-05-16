@@ -232,15 +232,19 @@ async def test_bot_client_called_with_correct_chat_id() -> None:
 @pytest.mark.anyio
 async def test_message_handler_routes_text_to_command_handler() -> None:
     ingestion_service = Mock(spec=TelegramIngestionService)
-    ingestion_service._build_ingestion_event = Mock(return_value={"message_type": "text"})
+    ingestion_service._build_ingestion_event = Mock(
+        return_value={"message_type": "text", "chat_id": 123}
+    )
     voice_note_service = AsyncMock(spec=VoiceNoteService)
     transcription_service = AsyncMock(spec=TranscriptionService)
     command_handler = AsyncMock()
+    bot_client = AsyncMock()
     handler = TelegramMessageHandler(
         ingestion_service=ingestion_service,
         voice_note_service=voice_note_service,
         transcription_service=transcription_service,
         command_handler=command_handler,
+        bot_client=bot_client,
     )
     update = {
         "message": {
@@ -265,17 +269,22 @@ async def test_message_handler_audio_path_unaffected() -> None:
             "telegram_file_id": "file-id",
         }
     )
+    ingestion_service.ingest_update = AsyncMock(
+        return_value={"outcome": "stored", "voice_note_id": "note-1", "source_name": None}
+    )
     voice_note_service = AsyncMock(spec=VoiceNoteService)
     voice_note_service._repository = Mock()
     voice_note_service._repository.get_voice_note_by_message_id = AsyncMock(return_value=None)
     transcription_service = Mock(spec=TranscriptionService)
     transcription_service.transcribe_telegram_audio = Mock(return_value="text")
     command_handler = AsyncMock()
+    bot_client = AsyncMock()
     handler = TelegramMessageHandler(
         ingestion_service=ingestion_service,
         voice_note_service=voice_note_service,
         transcription_service=transcription_service,
         command_handler=command_handler,
+        bot_client=bot_client,
     )
 
     result = await handler.handle({"message": {}})

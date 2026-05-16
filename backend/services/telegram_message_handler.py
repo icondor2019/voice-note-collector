@@ -93,9 +93,15 @@ class TelegramMessageHandler:
             return ingest_result
 
         voice_note_id = ingest_result.get("voice_note_id")
+        source_name = ingest_result.get("source_name")
         preview = raw_text[:100]
         preview_suffix = "..." if len(raw_text) > 100 else ""
-        success_message = f"✅ Note saved!\n📝 {preview}{preview_suffix}"
+        if source_name:
+            success_message = (
+                f"✅ Note saved!\n📂 Source: {source_name}\n📝 {preview}{preview_suffix}"
+            )
+        else:
+            success_message = f"✅ Note saved!\n📝 {preview}{preview_suffix}"
         await self._notify(chat_id, success_message)
 
         return {"outcome": "stored", "message_type": message_type}
