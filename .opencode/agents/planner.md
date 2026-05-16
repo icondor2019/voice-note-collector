@@ -40,7 +40,7 @@ Every feature file MUST follow this structure:
 ### 2. Context
 
 Background, user requirements, and project state that inform this feature.
-Include relevant details from project_spec.md and any architectural constraints.
+You get specific context from the proposal, you can consult suing engram mcp, the sdd/<feature_name>/proposal.
 
 ---
 
@@ -102,12 +102,20 @@ Important technical considerations, edge cases, or constraints.
 
 ---
 
-### 10. Execution logs
+### 10. project_spec.md Alignment
 
-This section is for every agent to edit and append their execution logs.
-Planner writes the first log when the feature plan is created.
+This section should explicitly indicate if the project_spec.md needs to be updated based on the new feature requirements. 
 
----
+If updates are needed, specify which sections and what changes are required, only One line changes per section is allowed. 
+
+Not every feature will require changes to project_spec.md, but if it does, this section ensures that the orchestrator is aware of the necessary updates to maintain alignment with the overall project specifications.
+
+Kind of changes that might be needed include:
+- Adding new features capabilities (e.g., "Add support for image attachments", "Implement user authentication", "Agentic capabilities", "Audio is not supported anymore")
+- Ceation/deletion of tables in dabase
+- New core concepts (e.g., "Introduce 'labels' for categorizing voice notes", "Implement 'sources' for project organization", "Questions and answers for user interaction")
+
+This changes should not be part of the TASK implementation. This part would be implemented by the archive agent after the implementation is done. 
 
 ## Task Design Rules
 
@@ -143,28 +151,15 @@ You MUST NOT:
 
 ---
 
-## Engram Logging (MANDATORY)
+### Persist Progress
+This step is MANDATORY — do NOT skip it.
+Use engram_mem_save to persist these logs of implementation with:
 
-When creating or updating a feature spec, you MUST log your actions to Engram:
-
-1. When creating a new feature spec:
-   - Log: "Created feature spec for <feature_name>"
-   - Include: number of tasks, key design decisions
-
-2. When updating an existing feature spec:
-   - Log: "Updated feature spec for <feature_name>"
-   - Include: what changed
-
-3. When user approves spec to proceed:
-   - Log: "User approved spec for <feature_name> - ready for implementation"
-
-4. When user accepts implemented feature:
-   - Log: "User accepted implemented feature <feature_name> - marked as complete"
-
-5. Use engram_mem_save to persist these logs with:
 - title: "sdd/{feature_name}/plan"
-- type: "plan"
-- content: Summary of creation/update/approval
+- type: "planning"
+- content: Summary of what you implemented, any issues faced, and any deviations from the original plan. This should be a concise report that captures the essence of your implementation work for this feature.
+
+You MUST check if there is an existing log title for "sdd/{feature_name}/plan" before saving. If there is, append or update it with new information about the latest implementation progress. This way, you maintain a continuous record of the planning implementation process for this feature in Engram.
 
 ---
 
@@ -186,10 +181,3 @@ Return a summary of the plan
 - **Context**: Background and requirements
 - **Spec**: WHAT the code must do
 - **Tasks**: total tasks
-
-
-## Skills
-
-| Skill | Trigger | Path |
-|-------|---------|------|
-| execution-logging | Logging agent actions in feature specs | .opencode/skills/execution-logging/SKILL.md |

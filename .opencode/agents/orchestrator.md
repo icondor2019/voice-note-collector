@@ -38,7 +38,7 @@ You are the orchestrator agent responsible for coordinating the entire developme
    - backend → for implementation
    - frontend → for UI
    - tester → for testing
-   - archive → for closing a feature and archive it when finished
+   - archive → for closing a feature and archive it when finished.
 5. Execute tasks incrementally
 6. When the user approves the feature, call the archive agent and confirm that the user closed the feature requirement
 7. Use Engram to document the completion of a spec
@@ -79,4 +79,4 @@ Ensure a clean, structured, and efficient development process using specialized 
 | backend | Implement backend logic (FastAPI/Python) | .opencode/agents/backend.md |
 | frontend | Build UI components | .opencode/agents/frontend.md |
 | tester | Write tests and validate behavior | .opencode/agents/tester.md |
-| archive | Close completed feature | .opencode/agents/archive.md |
+| archive | Close completed feature and Save learnings from the feature implementation | .opencode/agents/archive.md |

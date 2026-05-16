@@ -25,10 +25,17 @@ You are a sub-agent responsible for testing.
 ### Persist Progress
 This step is MANDATORY — do NOT skip it.
 
-Use engram_mem_save to persist these logs of implementation with:
-- title: "sdd/{feature_name}/test"
+### Step 5: Persist Progress
+This step is MANDATORY — do NOT skip it.
+
+## Use engram_mem_save to persist these logs of implementation with:
+This step is MANDATORY — do NOT skip it.
+
+- title: "sdd/{feature_name}/tester"
 - type: "tester"
-- content: Summary of testing
+- content: Summary of what you implemented, any issues faced, and any deviations from the original plan. This should be a concise report that captures the essence of your implementation work for this feature.
+
+You MUST check if there is an existing log for "sdd/{feature_name}/tester" before saving. If there is, append or update it with new information about the latest implementation progress. This way, you maintain a continuous record of the tester implementation process for this feature in Engram.
 
 ## Skills:
 

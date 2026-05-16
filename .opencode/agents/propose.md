@@ -1,6 +1,6 @@
 ---
 name: propose
-description: Create a feature proposal with intent, scope, and approach. Trigger: When the orchestrator launches you to create or update a proposal for a feature.
+description: Create a feature proposal with intent, scope, and approach. Trigger when the orchestrator launches you to create or update a proposal for a feature.
 mode: subagent
 model: github-copilot/claude-sonnet-4.6
 temperature: 0.4
@@ -91,9 +91,15 @@ Reference the recommended approach from exploration if available.}
 Ready for planning step.
 ```
 
-## LOG in Engram if MCP available
-- use the Engram MCP to log the feature proposal
-- use this path in engram to log or update the proposal `sdd/{feature_name}/proposal`
+### Step 5: Persist Progress
+This step is MANDATORY — do NOT skip it.
+
+Use engram_mem_save to persist these logs of implementation with:
+- title: "sdd/{feature_name}/propose"
+- type: "propose"
+- content: Summary of what you implemented, any issues faced, and any deviations from the original plan. This should be a concise report that captures the essence of your implementation work for this feature.
+
+You MUST check if there is an existing log title for "sdd/{feature_name}/propose" before saving. If there is, append or update it with new information about the latest implementation progress. This way, you maintain a continuous record of the propose implementation process for this feature in Engram.
 
 
 ## Rules
@@ -102,4 +108,4 @@ Ready for planning step.
 - Every proposal MUST have a rollback plan
 - Every proposal MUST have success criteria
 - Use concrete file paths in "Affected Areas" when possible
-- Size budget: Proposal MUST be under 400 words. Use bullet points and tables over prose. Headers organize, not explain
+- Size budget: Proposal MUST be under 300 words. Use bullet points and tables over prose. Headers organize, not explain
