@@ -13,6 +13,7 @@ from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_note_details_repository import VoiceNoteDetailsRepository
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.chat_mode_service import ChatModeService
+from backend.services.chat_agent_service import ChatAgentService
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import TelegramCommandHandler
@@ -94,6 +95,10 @@ def get_chat_mode_service() -> ChatModeService:
     return _chat_mode_service
 
 
+def get_chat_agent_service() -> ChatAgentService:
+    return ChatAgentService()
+
+
 def get_command_handler(
     source_service: SourceService = Depends(get_source_service),
     bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
@@ -115,6 +120,7 @@ def get_message_handler(
     command_handler: TelegramCommandHandler = Depends(get_command_handler),
     bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
     chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
+    chat_agent_service: ChatAgentService = Depends(get_chat_agent_service),
 ) -> TelegramMessageHandler:
     return TelegramMessageHandler(
         ingestion_service=ingestion_service,
@@ -123,6 +129,7 @@ def get_message_handler(
         command_handler=command_handler,
         bot_client=bot_client,
         chat_mode_service=chat_mode_service,
+        chat_agent_service=chat_agent_service,
     )
 
 
