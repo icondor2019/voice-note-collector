@@ -19,6 +19,7 @@ ERROR_MESSAGE = "❌ Failed to process your voice note. Please try again."
 def _build_event(
     *,
     chat_id: int | None = 123,
+    from_user_id: int | None = None,
     message_id: int = 10,
     telegram_file_id: str = "file-id",
     message_type: str = "voice",
@@ -26,6 +27,9 @@ def _build_event(
     return {
         "message_type": message_type,
         "chat_id": chat_id,
+        "from_user_id": settings.TELEGRAM_ALLOWED_USER_ID
+        if from_user_id is None
+        else from_user_id,
         "message_id": message_id,
         "telegram_file_id": telegram_file_id,
     }

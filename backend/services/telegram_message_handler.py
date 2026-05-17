@@ -47,6 +47,9 @@ class TelegramMessageHandler:
 
     async def handle(self, update: dict) -> dict:
         event = self._ingestion_service._build_ingestion_event(update)
+        from_user_id = event.get("from_user_id")
+        if from_user_id != settings.TELEGRAM_ALLOWED_USER_ID:
+            return {"outcome": "ignored", "reason": "unauthorized"}
         message_type = event["message_type"]
         chat_id = event.get("chat_id")
 
