@@ -3,6 +3,7 @@
 from loguru import logger
 
 from backend.repositories.repository_errors import DuplicateRecordError
+from backend.services.chat_mode_service import ChatModeService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import TelegramCommandHandler
 from backend.services.telegram_ingestion_service import TelegramIngestionService
@@ -11,6 +12,7 @@ from backend.services.voice_note_service import VoiceNoteService
 from configuration.settings import settings
 
 AUDIO_TYPES = {"voice", "audio"}
+AGENT_MOCK_RESPONSE = "🤖 Future agent logic here"
 
 
 class TelegramMessageHandler:
@@ -21,12 +23,14 @@ class TelegramMessageHandler:
         transcription_service: TranscriptionService,
         command_handler: TelegramCommandHandler,
         bot_client: TelegramBotClient,
+        chat_mode_service: ChatModeService,
     ) -> None:
         self._ingestion_service = ingestion_service
         self._voice_note_service = voice_note_service
         self._transcription_service = transcription_service
         self._command_handler = command_handler
         self._bot_client = bot_client
+        self._chat_mode_service = chat_mode_service
 
     async def _notify(self, chat_id: int | None, text: str) -> None:
         if not settings.TELEGRAM_NOTIFY_ON_TRANSCRIPTION:
@@ -48,8 +52,16 @@ class TelegramMessageHandler:
 
         if message_type == "text":
             text = update["message"]["text"]
-            await self._command_handler.handle_text(text, chat_id)
-            return {"outcome": "command", "message_type": "text"}
+            if text.strip().startswith("/"):
+                await self._command_handler.handle_text(text, chat_id)
+                return {"outcome": "command", "message_type": "text"}
+
+            if self._chat_mode_service.get_mode() == "agent":
+                if chat_id:
+                    await self._bot_client.send_message(chat_id, AGENT_MOCK_RESPONSE)
+                return {"outcome": "agent_response", "message_type": "text"}
+
+            return {"outcome": "ignored", "message_type": "text"}
 
         if message_type not in AUDIO_TYPES:
             return {"outcome": "ignored", "message_type": message_type}
@@ -64,16 +76,22 @@ class TelegramMessageHandler:
             )
             return {"outcome": "ignored", "message_type": message_type}
 
-        # Idempotency check BEFORE any expensive I/O
-        existing = await self._voice_note_service._repository.get_voice_note_by_message_id(
-            message_id
-        )
-        if existing:
-            return {"outcome": "duplicate", "message_type": message_type}
+        if self._chat_mode_service.get_mode() == "note":
+            # Idempotency check BEFORE any expensive I/O
+            existing = await self._voice_note_service._repository.get_voice_note_by_message_id(
+                message_id
+            )
+            if existing:
+                return {"outcome": "duplicate", "message_type": message_type}
 
         try:
             # Transcribe (TranscriptionService is sync)
             raw_text = self._transcription_service.transcribe_telegram_audio(telegram_file_id)
+
+            if self._chat_mode_service.get_mode() == "agent":
+                if chat_id:
+                    await self._bot_client.send_message(chat_id, AGENT_MOCK_RESPONSE)
+                return {"outcome": "agent_response", "message_type": message_type}
 
             # Persist with real transcription
             ingest_result = await self._ingestion_service.ingest_update(

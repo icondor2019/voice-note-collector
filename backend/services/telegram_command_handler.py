@@ -6,6 +6,11 @@ from loguru import logger
 
 from backend.repositories.labels_repository import LabelsRepository
 from backend.repositories.repository_errors import RepositoryError
+from backend.services.chat_mode_service import (
+    AGENT_MODE_ACTIVATED,
+    NOTE_MODE_ACTIVATED,
+    ChatModeService,
+)
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.utils.slug import slugify, validate_slug_input
@@ -32,10 +37,12 @@ class TelegramCommandHandler:
         source_service: SourceService,
         bot_client: TelegramBotClient,
         labels_repository: LabelsRepository,
+        chat_mode_service: ChatModeService,
     ) -> None:
         self._source_service = source_service
         self._bot_client = bot_client
         self._labels_repository = labels_repository
+        self._chat_mode_service = chat_mode_service
 
     def _parse_command(self, text: str) -> tuple[str, str]:
         normalized = text.strip()
@@ -61,6 +68,10 @@ class TelegramCommandHandler:
             reply = await self._handle_sources()
         elif command == "/label":
             reply = await self._handle_label(argument)
+        elif command == "/agent":
+            reply = self._handle_agent_mode()
+        elif command == "/note":
+            reply = self._handle_note_mode()
         else:
             reply = self._handle_unknown_text()
 
@@ -148,3 +159,11 @@ class TelegramCommandHandler:
 
     def _handle_unknown_text(self) -> str:
         return UNKNOWN_TEXT
+
+    def _handle_agent_mode(self) -> str:
+        self._chat_mode_service.set_mode("agent")
+        return AGENT_MODE_ACTIVATED
+
+    def _handle_note_mode(self) -> str:
+        self._chat_mode_service.set_mode("note")
+        return NOTE_MODE_ACTIVATED
