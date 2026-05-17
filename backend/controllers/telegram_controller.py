@@ -12,6 +12,7 @@ from backend.repositories.sources_repository import SourcesRepository
 from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_note_details_repository import VoiceNoteDetailsRepository
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
+from backend.services.chat_mode_service import ChatModeService
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import TelegramCommandHandler
@@ -23,6 +24,8 @@ from backend.services.voice_note_service import VoiceNoteService
 from configuration.settings import settings
 
 router = APIRouter(prefix="/api/telegram", tags=["Telegram"])
+
+_chat_mode_service = ChatModeService()
 
 
 async def get_supabase() -> Any:
@@ -87,15 +90,21 @@ def get_telegram_bot_client() -> TelegramBotClient:
     return TelegramBotClient(settings.TELEGRAM_BOT_TOKEN or "")
 
 
+def get_chat_mode_service() -> ChatModeService:
+    return _chat_mode_service
+
+
 def get_command_handler(
     source_service: SourceService = Depends(get_source_service),
     bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
     labels_repository: LabelsRepository = Depends(get_labels_repository),
+    chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
 ) -> TelegramCommandHandler:
     return TelegramCommandHandler(
         source_service=source_service,
         bot_client=bot_client,
         labels_repository=labels_repository,
+        chat_mode_service=chat_mode_service,
     )
 
 
@@ -105,6 +114,7 @@ def get_message_handler(
     transcription_service: TranscriptionService = Depends(get_transcription_service),
     command_handler: TelegramCommandHandler = Depends(get_command_handler),
     bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
+    chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
 ) -> TelegramMessageHandler:
     return TelegramMessageHandler(
         ingestion_service=ingestion_service,
@@ -112,6 +122,7 @@ def get_message_handler(
         transcription_service=transcription_service,
         command_handler=command_handler,
         bot_client=bot_client,
+        chat_mode_service=chat_mode_service,
     )
 
 

@@ -2,8 +2,12 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from backend.services.chat_mode_service import ChatModeService
 from backend.services.telegram_ingestion_service import TelegramIngestionService
-from backend.services.telegram_message_handler import TelegramMessageHandler
+from backend.services.telegram_message_handler import (
+    AGENT_MOCK_RESPONSE,
+    TelegramMessageHandler,
+)
 from backend.services.transcription_service import TranscriptionService
 from backend.services.voice_note_service import VoiceNoteService
 from configuration.settings import settings
@@ -36,6 +40,7 @@ def _build_handler(
     transcription_error: Exception | None = None,
     ingestion_error: Exception | None = None,
     bot_client_error: Exception | None = None,
+    chat_mode_service: ChatModeService | None = None,
 ) -> tuple[
     TelegramMessageHandler,
     Mock,
@@ -81,6 +86,7 @@ def _build_handler(
         transcription_service=transcription_service,
         command_handler=command_handler,
         bot_client=bot_client,
+        chat_mode_service=chat_mode_service or ChatModeService(),
     )
     return handler, ingestion_service, voice_note_service, transcription_service, bot_client
 
@@ -218,3 +224,61 @@ async def test_duplicate_update_skips_notification() -> None:
     bot_client.send_message.assert_not_awaited()
     transcription_service.transcribe_telegram_audio.assert_not_called()
     assert result == {"outcome": "duplicate", "message_type": "voice"}
+
+
+@pytest.mark.anyio
+async def test_text_non_command_note_mode_ignored() -> None:
+    event = _build_event(message_type="text")
+    handler, _, _, _, bot_client = _build_handler(event)
+    update = {"message": {"text": "hello", "chat": {"id": 123}}}
+
+    result = await handler.handle(update)
+
+    bot_client.send_message.assert_not_awaited()
+    assert result == {"outcome": "ignored", "message_type": "text"}
+
+
+@pytest.mark.anyio
+async def test_text_non_command_agent_mode_replies() -> None:
+    event = _build_event(message_type="text")
+    chat_mode_service = ChatModeService()
+    chat_mode_service.set_mode("agent")
+    handler, _, _, _, bot_client = _build_handler(event, chat_mode_service=chat_mode_service)
+    update = {"message": {"text": "hello", "chat": {"id": 123}}}
+
+    result = await handler.handle(update)
+
+    bot_client.send_message.assert_awaited_once_with(123, AGENT_MOCK_RESPONSE)
+    assert result == {"outcome": "agent_response", "message_type": "text"}
+
+
+@pytest.mark.anyio
+async def test_text_command_in_agent_mode_routes_command_handler() -> None:
+    event = _build_event(message_type="text")
+    chat_mode_service = ChatModeService()
+    chat_mode_service.set_mode("agent")
+    handler, _, _, _, _ = _build_handler(event, chat_mode_service=chat_mode_service)
+    update = {"message": {"text": "/sources", "chat": {"id": 123}}}
+
+    result = await handler.handle(update)
+
+    handler._command_handler.handle_text.assert_awaited_once_with("/sources", 123)
+    assert result == {"outcome": "command", "message_type": "text"}
+
+
+@pytest.mark.anyio
+async def test_audio_agent_mode_transcribes_and_skips_storage() -> None:
+    event = _build_event(message_type="voice")
+    chat_mode_service = ChatModeService()
+    chat_mode_service.set_mode("agent")
+    handler, ingestion_service, voice_note_service, transcription_service, bot_client = (
+        _build_handler(event, chat_mode_service=chat_mode_service)
+    )
+
+    result = await handler.handle({"message": {"chat": {"id": 123}}})
+
+    transcription_service.transcribe_telegram_audio.assert_called_once_with("file-id")
+    ingestion_service.ingest_update.assert_not_awaited()
+    voice_note_service._repository.get_voice_note_by_message_id.assert_not_awaited()
+    bot_client.send_message.assert_awaited_once_with(123, AGENT_MOCK_RESPONSE)
+    assert result == {"outcome": "agent_response", "message_type": "voice"}

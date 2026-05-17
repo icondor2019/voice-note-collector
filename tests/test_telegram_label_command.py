@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from backend.repositories.repository_errors import RepositoryError
+from backend.services.chat_mode_service import ChatModeService
 from backend.services.telegram_command_handler import (
     LABEL_DUPLICATE,
     LABEL_INVALID,
@@ -20,6 +21,7 @@ def handler_mocks() -> tuple[TelegramCommandHandler, AsyncMock, AsyncMock, Async
         source_service=source_service,
         bot_client=bot_client,
         labels_repository=labels_repository,
+        chat_mode_service=ChatModeService(),
     )
     return handler, source_service, bot_client, labels_repository
 
