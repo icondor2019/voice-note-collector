@@ -13,6 +13,7 @@ from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.transcription_service import TranscriptionService
 from backend.services.voice_note_service import VoiceNoteService
 from backend.utils.slug import slugify, validate_slug_input
+from configuration.settings import settings
 
 
 @pytest.mark.parametrize(
@@ -298,7 +299,11 @@ async def test_bot_client_called_with_correct_chat_id() -> None:
 async def test_message_handler_routes_text_to_command_handler() -> None:
     ingestion_service = Mock(spec=TelegramIngestionService)
     ingestion_service._build_ingestion_event = Mock(
-        return_value={"message_type": "text", "chat_id": 123}
+        return_value={
+            "message_type": "text",
+            "chat_id": 123,
+            "from_user_id": settings.TELEGRAM_ALLOWED_USER_ID,
+        }
     )
     voice_note_service = AsyncMock(spec=VoiceNoteService)
     transcription_service = AsyncMock(spec=TranscriptionService)
@@ -333,6 +338,7 @@ async def test_message_handler_audio_path_unaffected() -> None:
             "message_type": "voice",
             "message_id": 1,
             "telegram_file_id": "file-id",
+            "from_user_id": settings.TELEGRAM_ALLOWED_USER_ID,
         }
     )
     ingestion_service.ingest_update = AsyncMock(
