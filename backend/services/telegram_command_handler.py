@@ -29,6 +29,19 @@ UNKNOWN_TEXT = "🤖 Send voice notes to capture ideas. Use /sources to manage s
 LABEL_SUCCESS = '✅ Label "{name}" created.'
 LABEL_DUPLICATE = '❌ Label "{name}" already exists.'
 LABEL_INVALID = "❌ Label name is invalid."
+HELP_MESSAGE = (
+    "📋 Available commands:\n\n"
+    "🤖 /agent — activate agent mode\n"
+    "📝 /note — activate note mode\n"
+    "📂 /sources — list your sources\n"
+    "✅ /current — show current active source\n"
+    "⚙️ /default — set default source\n"
+    "❓ /help — show this message\n\n"
+    "⚙️ Commands that require arguments:\n\n"
+    "➕ /create <name> — create a new source\n"
+    "🔀 /switch <name> — switch to a source by name\n"
+    "🏷️ /label <name> — add a label"
+)
 
 
 class TelegramCommandHandler:
@@ -72,6 +85,8 @@ class TelegramCommandHandler:
             reply = self._handle_agent_mode()
         elif command == "/note":
             reply = self._handle_note_mode()
+        elif command == "/help":
+            reply = self._handle_help()
         else:
             reply = self._handle_unknown_text()
 
@@ -167,3 +182,6 @@ class TelegramCommandHandler:
     def _handle_note_mode(self) -> str:
         self._chat_mode_service.set_mode("note")
         return NOTE_MODE_ACTIVATED
+
+    def _handle_help(self) -> str:
+        return HELP_MESSAGE

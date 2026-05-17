@@ -7,7 +7,7 @@ from backend.services.chat_mode_service import (
     NOTE_MODE_ACTIVATED,
     ChatModeService,
 )
-from backend.services.telegram_command_handler import TelegramCommandHandler
+from backend.services.telegram_command_handler import HELP_MESSAGE, TelegramCommandHandler
 from backend.services.telegram_message_handler import TelegramMessageHandler
 from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.transcription_service import TranscriptionService
@@ -278,6 +278,21 @@ async def test_note_command_sets_mode_and_replies() -> None:
     chat_mode_service.set_mode.assert_called_once_with("note")
     assert reply == NOTE_MODE_ACTIVATED
     bot_client.send_message.assert_awaited_once_with(123, reply)
+
+
+@pytest.mark.anyio
+async def test_help_command_returns_message() -> None:
+    source_service = AsyncMock()
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(
+        source_service, bot_client, labels_repository, ChatModeService()
+    )
+
+    reply = await handler.handle_text("/help", chat_id=123)
+
+    assert reply == HELP_MESSAGE
+    bot_client.send_message.assert_awaited_once_with(123, HELP_MESSAGE)
 
 
 @pytest.mark.anyio
