@@ -28,6 +28,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 * Basic web interface to view notes
 * Filtering notes by source
 * Simple label system for notes
+* Dual-mode Telegram bot: note mode (default) and agent mode (LLM-powered via LangGraph + gpt-4o-mini)
 
 ### Excluded (for now)
 
@@ -67,7 +68,7 @@ Main tables:
    audio: the system processes the audio, transcribes it, and stores it in the database.
    slash command: the system executes the command, ex: /newsource "Book A" → creates a new source and set it as active.
    images: not supported for now
-   plain text: not support for now
+   plain text: in note mode → stored as a voice note; in agent mode → sent to ChatAgentService for LLM response
 - output: most of it is backend executions. depending on the input also could include confirmation messages in telegram
 
 ---
@@ -97,3 +98,14 @@ Main tables:
 * Use `message_id` to prevent duplicates
 
 ---
+
+## 9. Services
+
+| Service | File | Responsibility |
+|---------|------|----------------|
+| VoiceNoteService | backend/services/voice_note_service.py | Create and store voice notes in Supabase |
+| TranscriptionService | backend/services/transcription_service.py | Transcribe audio via Groq Whisper |
+| TelegramIngestionService | backend/services/telegram_ingestion_service.py | Orchestrate audio download, transcription, and storage |
+| ChatModeService | backend/services/chat_mode_service.py | Global in-memory flag for note/agent mode toggle |
+| ChatAgentService | backend/services/chat_agent_service.py | LangGraph stateless LLM agent (gpt-4o-mini); handles agent-mode messages |
+| NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes |

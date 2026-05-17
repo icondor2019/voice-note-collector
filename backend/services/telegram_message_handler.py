@@ -4,6 +4,7 @@ from loguru import logger
 
 from backend.repositories.repository_errors import DuplicateRecordError
 from backend.services.chat_mode_service import ChatModeService
+from backend.services.chat_agent_service import ChatAgentService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import TelegramCommandHandler
 from backend.services.telegram_ingestion_service import TelegramIngestionService
@@ -12,7 +13,6 @@ from backend.services.voice_note_service import VoiceNoteService
 from configuration.settings import settings
 
 AUDIO_TYPES = {"voice", "audio"}
-AGENT_MOCK_RESPONSE = "🤖 Future agent logic here"
 
 
 class TelegramMessageHandler:
@@ -24,6 +24,7 @@ class TelegramMessageHandler:
         command_handler: TelegramCommandHandler,
         bot_client: TelegramBotClient,
         chat_mode_service: ChatModeService,
+        chat_agent_service: ChatAgentService,
     ) -> None:
         self._ingestion_service = ingestion_service
         self._voice_note_service = voice_note_service
@@ -31,6 +32,7 @@ class TelegramMessageHandler:
         self._command_handler = command_handler
         self._bot_client = bot_client
         self._chat_mode_service = chat_mode_service
+        self._chat_agent_service = chat_agent_service
 
     async def _notify(self, chat_id: int | None, text: str) -> None:
         if not settings.TELEGRAM_NOTIFY_ON_TRANSCRIPTION:
@@ -61,7 +63,8 @@ class TelegramMessageHandler:
 
             if self._chat_mode_service.get_mode() == "agent":
                 if chat_id:
-                    await self._bot_client.send_message(chat_id, AGENT_MOCK_RESPONSE)
+                    response = await self._chat_agent_service.get_response(text)
+                    await self._bot_client.send_message(chat_id, response)
                 return {"outcome": "agent_response", "message_type": "text"}
 
             return {"outcome": "ignored", "message_type": "text"}
@@ -93,7 +96,8 @@ class TelegramMessageHandler:
 
             if self._chat_mode_service.get_mode() == "agent":
                 if chat_id:
-                    await self._bot_client.send_message(chat_id, AGENT_MOCK_RESPONSE)
+                    response = await self._chat_agent_service.get_response(raw_text)
+                    await self._bot_client.send_message(chat_id, response)
                 return {"outcome": "agent_response", "message_type": message_type}
 
             # Persist with real transcription

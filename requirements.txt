@@ -7,3 +7,6 @@ httpx
 supabase
 loguru
 openai
+langgraph
+langchain-openai
+langchain-core
