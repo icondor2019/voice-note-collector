@@ -11,10 +11,31 @@ The objetive of this app is to save voice note from telegram, organize them by t
 Ver `docs/project_spec.md`
 
 ## Run
+
+### Prerequisites
+- [Infisical CLI](https://infisical.com/docs/cli/overview) installed and authenticated
+- Project secrets stored in Infisical under the `dev` environment
+
+### Setup
+```bash
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+```
+
+### Local execution (with Infisical)
+Secrets are managed via [Infisical](https://infisical.com). No `.env` file is needed.
+
+```bash
+make run_app
+```
+
+This runs:
+```bash
+infisical run --env=dev -- uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Infisical injects all required environment variables at startup. See `.env.example` for the full list of expected variables.
 
 ## Telegram webhook setup (local)
 1. Configure environment variables:
