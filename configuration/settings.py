@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: Optional[str] = None
     GROQ_USER: Optional[str] = None
 
+    # agent max lenght record
+    AGENT_MAX_MEMORY_MESSAGES: int = 10
+
     @field_validator("CORS_ORIGINS", "CORS_ALLOW_METHODS", "CORS_ALLOW_HEADERS", mode="before")
     @classmethod
     def _split_csv_to_list(cls, v: Any) -> Any:
