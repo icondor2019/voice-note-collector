@@ -24,9 +24,8 @@ From the orchestrator:
 ---
 
 ## Core Responsibility
-- Use this path to found the context for a feature planning and create the feature plan `specs/features/`
-- You read the file `<feature_name>_proposal.md` to understand the proposal approved by the user
-- Each feature MUST be written as a standalone file: `<feature_name>_plan.md`
+- Read the proposal from: `specs/features/<feature_name>_proposal.md`
+- Write the plan to: `specs/features/<feature_name>_plan.md`
 - use this path in engram to log or update the plan `sdd/{feature_name}/plan`
 
 ---

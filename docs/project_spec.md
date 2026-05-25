@@ -47,6 +47,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 - Source: A category or project that voice notes can be associated with. One source can be active at a time.
 - Label: A tag that can be applied to voice notes for organization and retrieval.
 - voice note details: Additional metadata about a voice note, such labels, title and processing status.
+- Chat memory: Per-user short-term conversation history stored in Supabase, scoped by telegram_user_id, used to provide context to the chat agent.
 
 ---
 
@@ -58,6 +59,7 @@ Main tables:
 - sources
 - labels
 - voice_note_details
+- voice_note_chat_memory (stores per-user short-term conversation history for the chat agent)
 
 ---
 
@@ -107,5 +109,5 @@ Main tables:
 | TranscriptionService | backend/services/transcription_service.py | Transcribe audio via Groq Whisper |
 | TelegramIngestionService | backend/services/telegram_ingestion_service.py | Orchestrate audio download, transcription, and storage |
 | ChatModeService | backend/services/chat_mode_service.py | Global in-memory flag for note/agent mode toggle |
-| ChatAgentService | backend/services/chat_agent_service.py | LangGraph stateless LLM agent (gpt-4o-mini); handles agent-mode messages |
+| ChatAgentService | backend/services/chat_agent_service.py | LangGraph LLM agent (gpt-4o-mini) with per-user short-term memory (last 5 messages); handles agent-mode messages |
 | NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes |
