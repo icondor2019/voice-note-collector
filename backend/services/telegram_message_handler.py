@@ -63,7 +63,9 @@ class TelegramMessageHandler:
 
             if self._chat_mode_service.get_mode() == "agent":
                 if chat_id:
-                    response = await self._chat_agent_service.get_response(text)
+                    response = await self._chat_agent_service.get_response(
+                        text, telegram_user_id=from_user_id
+                    )
                     await self._bot_client.send_message(chat_id, response)
                 return {"outcome": "agent_response", "message_type": "text"}
 
@@ -96,7 +98,9 @@ class TelegramMessageHandler:
 
             if self._chat_mode_service.get_mode() == "agent":
                 if chat_id:
-                    response = await self._chat_agent_service.get_response(raw_text)
+                    response = await self._chat_agent_service.get_response(
+                        raw_text, telegram_user_id=from_user_id
+                    )
                     await self._bot_client.send_message(chat_id, response)
                 return {"outcome": "agent_response", "message_type": message_type}
 

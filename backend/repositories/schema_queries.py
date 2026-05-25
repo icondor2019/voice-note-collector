@@ -55,3 +55,17 @@ CREATE TABLE IF NOT EXISTS voice_note_details (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 """
+
+# Chat memory table creation query
+CREATE_CHAT_MEMORY_TABLE_QUERY = """
+CREATE TABLE IF NOT EXISTS voice_note_chat_memory (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    telegram_user_id BIGINT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS voice_note_chat_memory_user_created_idx
+ON voice_note_chat_memory (telegram_user_id, created_at DESC);
+"""

@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 
+from backend.repositories.chat_memory_repository import ChatMemoryRepository
 from backend.repositories.labels_repository import LabelsRepository
 from backend.repositories.repository_errors import RepositoryError
 from backend.utils.security import verify_telegram_secret
@@ -95,8 +96,16 @@ def get_chat_mode_service() -> ChatModeService:
     return _chat_mode_service
 
 
-def get_chat_agent_service() -> ChatAgentService:
-    return ChatAgentService()
+async def get_chat_memory_repository(
+    client: Any = Depends(get_supabase),
+) -> ChatMemoryRepository:
+    return ChatMemoryRepository(client=client)
+
+
+async def get_chat_agent_service(
+    memory_repository: ChatMemoryRepository = Depends(get_chat_memory_repository),
+) -> ChatAgentService:
+    return ChatAgentService(memory_repository=memory_repository)
 
 
 def get_command_handler(

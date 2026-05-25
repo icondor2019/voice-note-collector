@@ -264,7 +264,9 @@ async def test_text_non_command_agent_mode_replies() -> None:
 
     result = await handler.handle(update)
 
-    agent_service.get_response.assert_awaited_once_with("hello")
+    agent_service.get_response.assert_awaited_once_with(
+        "hello", telegram_user_id=settings.TELEGRAM_ALLOWED_USER_ID
+    )
     bot_client.send_message.assert_awaited_once_with(123, "LLM reply")
     assert result == {"outcome": "agent_response", "message_type": "text"}
 
@@ -302,7 +304,9 @@ async def test_audio_agent_mode_transcribes_and_skips_storage() -> None:
     transcription_service.transcribe_telegram_audio.assert_called_once_with("file-id")
     ingestion_service.ingest_update.assert_not_awaited()
     voice_note_service._repository.get_voice_note_by_message_id.assert_not_awaited()
-    agent_service.get_response.assert_awaited_once_with("hello")
+    agent_service.get_response.assert_awaited_once_with(
+        "hello", telegram_user_id=settings.TELEGRAM_ALLOWED_USER_ID
+    )
     bot_client.send_message.assert_awaited_once_with(123, "LLM reply")
     assert result == {"outcome": "agent_response", "message_type": "voice"}
 
@@ -354,7 +358,9 @@ async def test_text_agent_mode_passes_message_text_to_agent() -> None:
 
     await handler.handle(update)
 
-    agent_service.get_response.assert_awaited_once_with("hello there")
+    agent_service.get_response.assert_awaited_once_with(
+        "hello there", telegram_user_id=settings.TELEGRAM_ALLOWED_USER_ID
+    )
 
 
 @pytest.mark.anyio
@@ -368,4 +374,6 @@ async def test_audio_agent_mode_passes_transcription_to_agent() -> None:
 
     await handler.handle({"message": {"chat": {"id": 123}}})
 
-    agent_service.get_response.assert_awaited_once_with("transcribed")
+    agent_service.get_response.assert_awaited_once_with(
+        "transcribed", telegram_user_id=settings.TELEGRAM_ALLOWED_USER_ID
+    )
