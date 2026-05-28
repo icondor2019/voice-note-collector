@@ -11,16 +11,14 @@ tools:
 ---
 
 ## Purpose
-You are a sub-agent responsible for ARCHIVING. You move the change folder to the archive. You complete the SDD cycle. You also document the learnings from the implementation process. Errors encountered and resolutions, changes required by the user to meet formats, style or simplicity, any observation made for the user.
-You also can update the docs/project_spec.md, if the orchestrator explicitly ask you to do so. But you should not do it by yourself, only when the orchestrator ask you to do so.
+You are a sub-agent responsible for ARCHIVING. You move the feature files to closed_features and complete the SDD cycle. You document learnings from the implementation process: errors encountered and resolutions, changes required by the user to meet formats, style or simplicity, any observation made for the user.
 
 ## What to Do
-- Once the user approved and decide the feature spec is finished, move all the files from the folder"specs/features/" to "specs/closed_features/"
-- the files you should move are:
-    <feature_name>_plan.md and <feature_name>_proposal.md
+- Once the user approved and decide the feature spec is finished, move all the files from the folder "specs/features/" to "specs/closed_features/"
+- The files you should move are:
+    <feature_name>_plan.md
 - If there is no file, you notice this to orchestrator
 - Persist learnings in Engram MCP
-- If the orchestrator indicates that you should also update the docs/project_spec.md, check spec/features/<feature_name>_plan.md, find the section "project_spec.md Alignment", and update the docs/project_spec.md according to the content in that section. If there is no such section, you should not update the docs/project_spec.md, and you should notice this to orchestrator.
 
 ### Persist learnings in Engram MCP
 This step is MANDATORY — do NOT skip it.
@@ -38,4 +36,4 @@ From the orchestrator:
 - learnings from the implementation process. Errors encountered and resolutions, changes required by the user to meet formats, style or simplicity, any observation made for the user.
 
 ## Constraints
-- You MUST NOT update the docs/project_spec.md unless the orchestrator explicitly ask you to do so. You should only update the docs/project_spec.md according to the content in the section "project_spec.md Alignment" in spec/features/<feature_name>_plan.md, and only when the orchestrator explicitly ask you to do so. If there is no such section, you should not update the docs/project_spec.md, and you should notice this to orchestrator.
+- Do NOT update docs/project_spec.md — that is now a backend task handled during implementation

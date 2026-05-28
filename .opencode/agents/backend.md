@@ -28,7 +28,6 @@ Before writing ANY code:
 - Read the design section — understand HOW to structure the code
 - Read the task - understand the need changes required
 - Read existing code in affected files — understand current patterns
-- Ignore the section project_spec.md Alignment, it is for the planner agent, not for you.
 
 ### Step 3: implement Tasks
 FOR EACH TASK:
