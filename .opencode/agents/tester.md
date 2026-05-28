@@ -1,7 +1,7 @@
 ---
 description: Writes tests and validates system behavior
 mode: subagent
-model: github-copilot/gpt-5.2-codex
+model: opencode-go/minimax-m2.5
 temperature: 0.1
 tools:
   write: true
