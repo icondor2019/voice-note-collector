@@ -2,7 +2,7 @@
 name: planner
 description: Breaks down features into structured, executable task files
 mode: subagent
-model: github-copilot/claude-sonnet-4.6
+model: opencode-go/glm-5.1
 temperature: 0.2
 tools:
   write: true

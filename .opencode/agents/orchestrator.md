@@ -1,7 +1,7 @@
 ---
 description: Orchestrates agents and manages the development workflow
 mode: primary
-model: github-copilot/claude-sonnet-4.6
+model: opencode-go/minimax-m2.7
 temperature: 0.1
 tools:
   write: false
