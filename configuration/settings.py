@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # agent max lenght record
     AGENT_MAX_MEMORY_MESSAGES: int = 10
 
+    # Reflection settings
+    REFLECTION_NOTES_COUNT: int = 5
+    REFLECTION_LLM_MODEL: str = "gpt-4o-mini"
+
     @field_validator("CORS_ORIGINS", "CORS_ALLOW_METHODS", "CORS_ALLOW_HEADERS", mode="before")
     @classmethod
     def _split_csv_to_list(cls, v: Any) -> Any:

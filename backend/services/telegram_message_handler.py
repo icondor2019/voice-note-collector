@@ -5,8 +5,12 @@ from loguru import logger
 from backend.repositories.repository_errors import DuplicateRecordError
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.chat_agent_service import ChatAgentService
+from backend.services.reflection_service import ReflectionService
 from backend.services.telegram_bot_client import TelegramBotClient
-from backend.services.telegram_command_handler import TelegramCommandHandler
+from backend.services.telegram_command_handler import (
+    REFLECTION_FEEDBACK_TEMPLATE,
+    TelegramCommandHandler,
+)
 from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.transcription_service import TranscriptionService
 from backend.services.voice_note_service import VoiceNoteService
@@ -25,6 +29,7 @@ class TelegramMessageHandler:
         bot_client: TelegramBotClient,
         chat_mode_service: ChatModeService,
         chat_agent_service: ChatAgentService,
+        reflection_service: ReflectionService,
     ) -> None:
         self._ingestion_service = ingestion_service
         self._voice_note_service = voice_note_service
@@ -33,6 +38,7 @@ class TelegramMessageHandler:
         self._bot_client = bot_client
         self._chat_mode_service = chat_mode_service
         self._chat_agent_service = chat_agent_service
+        self._reflection_service = reflection_service
 
     async def _notify(self, chat_id: int | None, text: str) -> None:
         if not settings.TELEGRAM_NOTIFY_ON_TRANSCRIPTION:
@@ -55,10 +61,64 @@ class TelegramMessageHandler:
         message_type = event["message_type"]
         chat_id = event.get("chat_id")
 
+        # Check for pending reflection first (only for text and audio messages)
+        pending = await self._reflection_service.get_pending_reflection(from_user_id)
+
+        if pending:
+            if message_type == "text":
+                text = update["message"]["text"]
+                if text.strip().startswith("/"):
+                    # Slash command → cancel reflection, process command
+                    await self._reflection_service.cancel_pending_reflection(from_user_id)
+                    await self._command_handler.handle_text(text, chat_id, from_user_id)
+                    return {"outcome": "command", "message_type": message_type}
+
+                # User is answering the reflection question with text
+                result = await self._reflection_service.complete_reflection(
+                    from_user_id, text
+                )
+                await self._bot_client.send_message(
+                    chat_id,
+                    REFLECTION_FEEDBACK_TEMPLATE.format(
+                        rating=result.rating, feedback=result.feedback
+                    ),
+                )
+                return {"outcome": "reflection_completed", "message_type": message_type}
+
+            if message_type in AUDIO_TYPES:
+                telegram_file_id = event.get("telegram_file_id")
+                if not telegram_file_id:
+                    logger.warning(
+                        "Voice message ignored — missing telegram_file_id: message_id={}",
+                        event.get("message_id"),
+                    )
+                    return {"outcome": "ignored", "message_type": message_type}
+
+                # Transcribe voice note
+                raw_text = self._transcription_service.transcribe_telegram_audio(
+                    telegram_file_id
+                )
+
+                # Complete reflection with transcription
+                result = await self._reflection_service.complete_reflection(
+                    from_user_id, raw_text
+                )
+                await self._bot_client.send_message(
+                    chat_id,
+                    REFLECTION_FEEDBACK_TEMPLATE.format(
+                        rating=result.rating, feedback=result.feedback
+                    ),
+                )
+                return {"outcome": "reflection_completed", "message_type": message_type}
+
+            # Non-text, non-audio message while pending reflection → ignore
+            return {"outcome": "ignored", "message_type": message_type}
+
+        # No pending reflection → normal flow
         if message_type == "text":
             text = update["message"]["text"]
             if text.strip().startswith("/"):
-                await self._command_handler.handle_text(text, chat_id)
+                await self._command_handler.handle_text(text, chat_id, from_user_id)
                 return {"outcome": "command", "message_type": "text"}
 
             if self._chat_mode_service.get_mode() == "agent":

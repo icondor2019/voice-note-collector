@@ -57,7 +57,7 @@ async def test_create_success() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/create my new source", chat_id=123)
@@ -74,7 +74,7 @@ async def test_create_already_exists() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/create my new source", chat_id=123)
@@ -90,7 +90,7 @@ async def test_create_invalid_name() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/create source", chat_id=123)
@@ -106,7 +106,7 @@ async def test_switch_success() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/switch my new source", chat_id=123)
@@ -122,7 +122,7 @@ async def test_switch_not_found() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/switch my new source", chat_id=123)
@@ -137,7 +137,7 @@ async def test_switch_invalid_name() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/switch", chat_id=123)
@@ -152,7 +152,7 @@ async def test_default_activates_default_source() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/default", chat_id=123)
@@ -169,7 +169,7 @@ async def test_current_returns_active_source_name() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/current", chat_id=123)
@@ -185,7 +185,7 @@ async def test_current_no_active_source() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/current", chat_id=123)
@@ -205,7 +205,7 @@ async def test_sources_lists_all() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/sources", chat_id=123)
@@ -224,7 +224,7 @@ async def test_sources_empty() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/sources", chat_id=123)
@@ -238,7 +238,7 @@ async def test_non_command_text() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("hello there", chat_id=123)
@@ -253,7 +253,7 @@ async def test_agent_command_sets_mode_and_replies() -> None:
     labels_repository = AsyncMock()
     chat_mode_service = Mock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, chat_mode_service
+        source_service, bot_client, labels_repository, chat_mode_service, AsyncMock()
     )
 
     reply = await handler.handle_text("/agent", chat_id=123)
@@ -270,7 +270,7 @@ async def test_note_command_sets_mode_and_replies() -> None:
     labels_repository = AsyncMock()
     chat_mode_service = Mock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, chat_mode_service
+        source_service, bot_client, labels_repository, chat_mode_service, AsyncMock()
     )
 
     reply = await handler.handle_text("/note", chat_id=123)
@@ -285,8 +285,9 @@ async def test_help_command_returns_message() -> None:
     source_service = AsyncMock()
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
+    reflection_service = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), reflection_service
     )
 
     reply = await handler.handle_text("/help", chat_id=123)
@@ -302,7 +303,7 @@ async def test_bot_client_called_with_correct_chat_id() -> None:
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
     handler = TelegramCommandHandler(
-        source_service, bot_client, labels_repository, ChatModeService()
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
     reply = await handler.handle_text("/current", chat_id=456)
@@ -324,6 +325,7 @@ async def test_message_handler_routes_text_to_command_handler() -> None:
     transcription_service = AsyncMock(spec=TranscriptionService)
     command_handler = AsyncMock()
     bot_client = AsyncMock()
+    reflection_service = AsyncMock()
     handler = TelegramMessageHandler(
         ingestion_service=ingestion_service,
         voice_note_service=voice_note_service,
@@ -332,6 +334,7 @@ async def test_message_handler_routes_text_to_command_handler() -> None:
         bot_client=bot_client,
         chat_mode_service=ChatModeService(),
         chat_agent_service=AsyncMock(),
+        reflection_service=reflection_service,
     )
     update = {
         "message": {
@@ -342,7 +345,7 @@ async def test_message_handler_routes_text_to_command_handler() -> None:
 
     result = await handler.handle(update)
 
-    command_handler.handle_text.assert_awaited_once_with("/current", 123)
+    command_handler.handle_text.assert_awaited_once_with("/current", 123, 123)
     assert result == {"outcome": "command", "message_type": "text"}
 
 
@@ -367,6 +370,7 @@ async def test_message_handler_audio_path_unaffected() -> None:
     transcription_service.transcribe_telegram_audio = Mock(return_value="text")
     command_handler = AsyncMock()
     bot_client = AsyncMock()
+    reflection_service = AsyncMock()
     handler = TelegramMessageHandler(
         ingestion_service=ingestion_service,
         voice_note_service=voice_note_service,
@@ -375,6 +379,7 @@ async def test_message_handler_audio_path_unaffected() -> None:
         bot_client=bot_client,
         chat_mode_service=ChatModeService(),
         chat_agent_service=AsyncMock(),
+        reflection_service=reflection_service,
     )
 
     result = await handler.handle({"message": {}})
