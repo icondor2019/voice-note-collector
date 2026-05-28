@@ -11,6 +11,11 @@ from backend.services.chat_mode_service import (
     NOTE_MODE_ACTIVATED,
     ChatModeService,
 )
+from backend.services.reflection_service import (
+    NoActiveSourceError,
+    NoNotesError,
+    ReflectionService,
+)
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.utils.slug import slugify, validate_slug_input
@@ -20,8 +25,8 @@ CREATE_DUPLICATE = '❌ Source "{slug}" already exists. Use /switch to activate 
 SWITCH_SUCCESS = '✅ Active source is now "{slug}".'
 SWITCH_NOT_FOUND = '❌ Source "{slug}" not found. Use /sources to see available sources.'
 DEFAULT_SUCCESS = '✅ Active source is now "default".'
-CURRENT_ACTIVE = '📍 Active source: "{name}"'
-CURRENT_NONE = '⚠️ No active source. Use /default to reset.'
+CURRENT_ACTIVE = '📍 Active source: "{name}"\n🤖 Mode: {mode}'
+CURRENT_NONE = '⚠️ No active source. Use /default to reset.\n🤖 Mode: {mode}'
 SOURCES_HEADER = "📂 Your sources:\n"
 SOURCES_EMPTY = "📂 No sources found. Use /create <name> to get started."
 INVALID_NAME = "❌ Source name must be 2–4 words, no special characters."
@@ -29,19 +34,26 @@ UNKNOWN_TEXT = "🤖 Send voice notes to capture ideas. Use /sources to manage s
 LABEL_SUCCESS = '✅ Label "{name}" created.'
 LABEL_DUPLICATE = '❌ Label "{name}" already exists.'
 LABEL_INVALID = "❌ Label name is invalid."
+REFLECTION_FEEDBACK_TEMPLATE = "🧠 Rating: {rating}/10\n\n{feedback}"
 HELP_MESSAGE = (
     "📋 Available commands:\n\n"
     "🤖 /agent — activate agent mode\n"
     "📝 /note — activate note mode\n"
     "📂 /sources — list your sources\n"
-    "✅ /current — show current active source\n"
+    "✅ /current — show active source and mode\n"
     "⚙️ /default — set default source\n"
+    "🧠 /reflect — start a reflection question\n"
     "❓ /help — show this message\n\n"
     "⚙️ Commands that require arguments:\n\n"
     "➕ /create <name> — create a new source\n"
     "🔀 /switch <name> — switch to a source by name\n"
     "🏷️ /label <name> — add a label"
 )
+
+MODE_DISPLAY_NAMES = {
+    "agent": "agent",
+    "note": "note",
+}
 
 
 class TelegramCommandHandler:
@@ -51,11 +63,13 @@ class TelegramCommandHandler:
         bot_client: TelegramBotClient,
         labels_repository: LabelsRepository,
         chat_mode_service: ChatModeService,
+        reflection_service: ReflectionService,
     ) -> None:
         self._source_service = source_service
         self._bot_client = bot_client
         self._labels_repository = labels_repository
         self._chat_mode_service = chat_mode_service
+        self._reflection_service = reflection_service
 
     def _parse_command(self, text: str) -> tuple[str, str]:
         normalized = text.strip()
@@ -67,7 +81,7 @@ class TelegramCommandHandler:
         argument = parts[1].strip() if len(parts) > 1 else ""
         return command, argument
 
-    async def handle_text(self, text: str, chat_id: int | str) -> str:
+    async def handle_text(self, text: str, chat_id: int | str, from_user_id: int | None = None) -> str:
         command, argument = self._parse_command(text)
         if command == "/create":
             reply = await self._handle_create(argument)
@@ -81,6 +95,8 @@ class TelegramCommandHandler:
             reply = await self._handle_sources()
         elif command == "/label":
             reply = await self._handle_label(argument)
+        elif command == "/reflect":
+            reply = await self._handle_reflect(from_user_id)
         elif command == "/agent":
             reply = self._handle_agent_mode()
         elif command == "/note":
@@ -131,12 +147,16 @@ class TelegramCommandHandler:
         logger.info("telegram.command.default")
         return DEFAULT_SUCCESS
 
+    def _get_mode_display(self) -> str:
+        return MODE_DISPLAY_NAMES.get(self._chat_mode_service.get_mode(), "note")
+
     async def _handle_current(self) -> str:
         active = await self._source_service.get_active_source()
+        mode = self._get_mode_display()
         if not active:
-            return CURRENT_NONE
+            return CURRENT_NONE.format(mode=mode)
 
-        return CURRENT_ACTIVE.format(name=active["source_name"])
+        return CURRENT_ACTIVE.format(name=active["source_name"], mode=mode)
 
     async def _handle_sources(self) -> str:
         sources = await self._source_service.list_sources()
@@ -171,6 +191,15 @@ class TelegramCommandHandler:
 
         logger.info("telegram.command.label", extra={"name": name})
         return LABEL_SUCCESS.format(name=name)
+
+    async def _handle_reflect(self, telegram_user_id: int) -> str:
+        try:
+            result = await self._reflection_service.start_reflection(telegram_user_id)
+            return f"🧠 {result.question_text}"
+        except NoActiveSourceError:
+            return "⚠️ No active source. Use /switch or /default to set one."
+        except NoNotesError:
+            return "⚠️ No notes found in your active source. Send some voice notes first!"
 
     def _handle_unknown_text(self) -> str:
         return UNKNOWN_TEXT

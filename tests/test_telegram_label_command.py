@@ -13,22 +13,24 @@ from backend.services.telegram_command_handler import (
 
 
 @pytest.fixture
-def handler_mocks() -> tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]:
+def handler_mocks() -> tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
     source_service = AsyncMock()
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
+    reflection_service = AsyncMock()
     handler = TelegramCommandHandler(
         source_service=source_service,
         bot_client=bot_client,
         labels_repository=labels_repository,
         chat_mode_service=ChatModeService(),
+        reflection_service=reflection_service,
     )
-    return handler, source_service, bot_client, labels_repository
+    return handler, source_service, bot_client, labels_repository, reflection_service
 
 
 @pytest.mark.anyio
-async def test_label_success(handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]) -> None:
-    handler, _, bot_client, labels_repository = handler_mocks
+async def test_label_success(handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]) -> None:
+    handler, _, bot_client, labels_repository, _ = handler_mocks
     labels_repository.get_label_by_name = AsyncMock(return_value=None)
     labels_repository.create_label = AsyncMock(return_value={"id": 1})
 
@@ -42,9 +44,9 @@ async def test_label_success(handler_mocks: tuple[TelegramCommandHandler, AsyncM
 
 @pytest.mark.anyio
 async def test_label_success_normalizes_case(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
     labels_repository.get_label_by_name = AsyncMock(return_value=None)
     labels_repository.create_label = AsyncMock(return_value={"id": 1})
 
@@ -56,9 +58,9 @@ async def test_label_success_normalizes_case(
 
 @pytest.mark.anyio
 async def test_label_success_strips_whitespace(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
     labels_repository.get_label_by_name = AsyncMock(return_value=None)
     labels_repository.create_label = AsyncMock(return_value={"id": 1})
 
@@ -70,9 +72,9 @@ async def test_label_success_strips_whitespace(
 
 @pytest.mark.anyio
 async def test_label_duplicate_via_get(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
     labels_repository.get_label_by_name = AsyncMock(return_value={"id": 1})
 
     reply = await handler.handle_text("/label ideas", chat_id=123)
@@ -83,9 +85,9 @@ async def test_label_duplicate_via_get(
 
 @pytest.mark.anyio
 async def test_label_duplicate_via_repository_error(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
     labels_repository.get_label_by_name = AsyncMock(return_value=None)
     labels_repository.create_label = AsyncMock(
         side_effect=RepositoryError("unique constraint")
@@ -98,9 +100,9 @@ async def test_label_duplicate_via_repository_error(
 
 @pytest.mark.anyio
 async def test_label_non_unique_repository_error_reraises(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
     labels_repository.get_label_by_name = AsyncMock(return_value=None)
     labels_repository.create_label = AsyncMock(
         side_effect=RepositoryError("connection failed")
@@ -112,9 +114,9 @@ async def test_label_non_unique_repository_error_reraises(
 
 @pytest.mark.anyio
 async def test_label_empty_argument(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
 
     reply = await handler.handle_text("/label", chat_id=123)
 
@@ -124,9 +126,9 @@ async def test_label_empty_argument(
 
 @pytest.mark.anyio
 async def test_label_whitespace_only_argument(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
 
     reply = await handler.handle_text("/label    ", chat_id=123)
 
@@ -136,9 +138,9 @@ async def test_label_whitespace_only_argument(
 
 @pytest.mark.anyio
 async def test_label_too_long(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
     long_name = "a" * 65
 
     reply = await handler.handle_text(f"/label {long_name}", chat_id=123)
@@ -149,9 +151,9 @@ async def test_label_too_long(
 
 @pytest.mark.anyio
 async def test_label_invalid_chars(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
 
     reply = await handler.handle_text("/label hello world!", chat_id=123)
 
@@ -161,9 +163,9 @@ async def test_label_invalid_chars(
 
 @pytest.mark.anyio
 async def test_label_valid_with_spaces(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
     labels_repository.get_label_by_name = AsyncMock(return_value=None)
     labels_repository.create_label = AsyncMock(return_value={"id": 1})
 
@@ -175,9 +177,9 @@ async def test_label_valid_with_spaces(
 
 @pytest.mark.anyio
 async def test_label_valid_with_hyphens(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, _, _, labels_repository = handler_mocks
+    handler, _, _, labels_repository, _ = handler_mocks
     labels_repository.get_label_by_name = AsyncMock(return_value=None)
     labels_repository.create_label = AsyncMock(return_value={"id": 1})
 
@@ -189,9 +191,9 @@ async def test_label_valid_with_hyphens(
 
 @pytest.mark.anyio
 async def test_existing_source_command_unaffected(
-    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock]
+    handler_mocks: tuple[TelegramCommandHandler, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 ) -> None:
-    handler, source_service, _, labels_repository = handler_mocks
+    handler, source_service, _, labels_repository, _ = handler_mocks
     source_service.list_sources = AsyncMock(return_value=[])
 
     reply = await handler.handle_text("/sources", chat_id=123)

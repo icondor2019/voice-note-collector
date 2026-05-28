@@ -69,3 +69,26 @@ CREATE TABLE IF NOT EXISTS voice_note_chat_memory (
 CREATE INDEX IF NOT EXISTS voice_note_chat_memory_user_created_idx
 ON voice_note_chat_memory (telegram_user_id, created_at DESC);
 """
+
+# Reflections table creation query
+CREATE_REFLECTIONS_TABLE_QUERY = """
+CREATE TABLE IF NOT EXISTS reflections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    telegram_user_id BIGINT NOT NULL,
+    voice_note_id UUID REFERENCES voice_notes(id) ON DELETE SET NULL,
+    question_type TEXT NOT NULL CHECK (question_type IN ('follow-up', 'reflective', 'quiz', 'elaboration', 'comparison')),
+    question_text TEXT NOT NULL,
+    answer_text TEXT,
+    rating INTEGER CHECK (rating IS NULL OR (rating >= 1 AND rating <= 10)),
+    feedback TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'cancelled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS reflections_user_status_idx
+ON reflections (telegram_user_id, status);
+
+CREATE INDEX IF NOT EXISTS reflections_user_created_idx
+ON reflections (telegram_user_id, created_at DESC);
+"""

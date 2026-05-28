@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from langchain_openai import ChatOpenAI
 from loguru import logger
 
 from backend.repositories.chat_memory_repository import ChatMemoryRepository
 from backend.repositories.labels_repository import LabelsRepository
+from backend.repositories.reflection_repository import ReflectionRepository
 from backend.repositories.repository_errors import RepositoryError
 from backend.utils.security import verify_telegram_secret
 from backend.repositories.sources_repository import SourcesRepository
@@ -15,6 +17,7 @@ from backend.repositories.voice_note_details_repository import VoiceNoteDetailsR
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.chat_agent_service import ChatAgentService
+from backend.services.reflection_service import ReflectionService
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import TelegramCommandHandler
@@ -108,17 +111,42 @@ async def get_chat_agent_service(
     return ChatAgentService(memory_repository=memory_repository)
 
 
+def get_reflection_repository(
+    client: Any = Depends(get_supabase),
+) -> ReflectionRepository:
+    return ReflectionRepository(client=client)
+
+
+def get_reflection_service(
+    reflection_repository: ReflectionRepository = Depends(get_reflection_repository),
+    voice_notes_repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
+    sources_repository: SourcesRepository = Depends(get_sources_repository),
+) -> ReflectionService:
+    model = ChatOpenAI(
+        model=settings.REFLECTION_LLM_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+    )
+    return ReflectionService(
+        reflection_repository=reflection_repository,
+        voice_notes_repository=voice_notes_repository,
+        sources_repository=sources_repository,
+        model=model,
+    )
+
+
 def get_command_handler(
     source_service: SourceService = Depends(get_source_service),
     bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
     labels_repository: LabelsRepository = Depends(get_labels_repository),
     chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
+    reflection_service: ReflectionService = Depends(get_reflection_service),
 ) -> TelegramCommandHandler:
     return TelegramCommandHandler(
         source_service=source_service,
         bot_client=bot_client,
         labels_repository=labels_repository,
         chat_mode_service=chat_mode_service,
+        reflection_service=reflection_service,
     )
 
 
@@ -130,6 +158,7 @@ def get_message_handler(
     bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
     chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
     chat_agent_service: ChatAgentService = Depends(get_chat_agent_service),
+    reflection_service: ReflectionService = Depends(get_reflection_service),
 ) -> TelegramMessageHandler:
     return TelegramMessageHandler(
         ingestion_service=ingestion_service,
@@ -139,6 +168,7 @@ def get_message_handler(
         bot_client=bot_client,
         chat_mode_service=chat_mode_service,
         chat_agent_service=chat_agent_service,
+        reflection_service=reflection_service,
     )
 
 
