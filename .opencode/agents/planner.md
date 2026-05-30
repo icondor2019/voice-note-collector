@@ -24,6 +24,22 @@ From the orchestrator:
 
 ---
 
+## CRITICAL: Check for Active Feature FIRST
+
+Before doing ANYTHING else — before reading project_spec.md, before searching engram, before asking questions — you MUST check if a feature is already in development.
+
+### Step 0: Check specs/features/ for existing .md files
+
+1. List the contents of `specs/features/` directory
+2. If a `.md` file exists → a feature is currently in the oven
+3. If a feature is in progress, you have TWO options:
+   - **Update the existing file** if the new request is about the same feature
+   - **Ask the user** "A feature is already in progress at specs/features/<filename>.md. Should I update it or start a new feature?"
+
+You MUST NOT start a new feature plan while another feature file exists in `specs/features/` without explicit user confirmation.
+
+---
+
 ## CRITICAL: Ask Questions First Phase
 
 You MUST NOT create a plan on the first attempt. Every planning session starts with a clarification round.
@@ -212,3 +228,27 @@ Return a summary of the plan
 - **Context**: Background and requirements
 - **Spec**: WHAT the code must do
 - **Tasks**: total tasks
+
+---
+
+## File Naming Convention (MANDATORY)
+
+The plan file MUST be named exactly as follows:
+
+```
+<feature-name>_plan.md
+```
+
+**Examples:**
+- ✅ `note_selector_service_plan.md`
+- ❌ `note_selector_feature.md` (wrong suffix)
+- ❌ `note_selector_service.md` (missing `_plan` suffix)
+- ❌ `note_selector.md` (too vague, missing `_plan` suffix)
+- ❌ `note-selector-service-plan.md` (uses hyphens instead of underscores)
+
+**Rules:**
+- Always use underscores (`_`) not hyphens (`-`)
+- Always end with `_plan.md`
+- The `<feature-name>` should be descriptive and use snake_case
+
+**This is a criteria of acceptance.** Always verify the filename matches this format before saving. If you are updating an existing file that does NOT follow this convention, rename it to match before making updates.

@@ -70,8 +70,10 @@ class Settings(BaseSettings):
     AGENT_MAX_MEMORY_MESSAGES: int = 10
 
     # Reflection settings
-    REFLECTION_NOTES_COUNT: int = 5
-    REFLECTION_LLM_MODEL: str = "gpt-4o-mini"
+    REFLECTION_NOTES_COUNT: int = 10
+    REFLECTION_LLM_MODEL: str = "gpt-5.4-mini"
+    REFLECTION_MIN_AVG_SCORE: int = 8
+    REFLECTION_MIN_REVIEWS: int = 2
 
     @field_validator("CORS_ORIGINS", "CORS_ALLOW_METHODS", "CORS_ALLOW_HEADERS", mode="before")
     @classmethod

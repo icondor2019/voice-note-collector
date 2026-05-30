@@ -1,3 +1,5 @@
+"""Unit tests for ReflectionService after NoteSelectorService integration."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -9,6 +11,7 @@ import pytest
 
 from backend.models.reflection import ReflectionEntry, ReflectionQuestionResult, ReflectionRatingResult
 from backend.services.reflection_service import (
+    AllNotesInternalizedError,
     NoActiveSourceError,
     NoNotesError,
     ReflectionService,
@@ -27,13 +30,15 @@ class MockChatOpenAI:
         return mock_response
 
 
-class TestReflectionService:
+class TestReflectionServiceWithNoteSelector:
+    """Tests for ReflectionService using NoteSelectorService for note selection."""
+
     @pytest.mark.anyio
-    async def test_start_reflection_creates_pending_reflection(self) -> None:
-        # Setup mocks
+    async def test_start_reflection_uses_note_selector_to_pick_note(self) -> None:
+        """Verify NoteSelectorService.pick_note is called with source_id."""
         reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
         sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
         model = MockChatOpenAI(
             response_content='{"question_type": "reflective", "question_text": "What did you learn?"}'
         )
@@ -41,16 +46,14 @@ class TestReflectionService:
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test"}
         )
-        voice_notes_repository.list_voice_notes = AsyncMock(
-            return_value=[
-                {"id": "note-1", "raw_text": "Note 1"},
-                {"id": "note-2", "raw_text": "Note 2"},
-            ]
+        note_selector_service.pick_note = AsyncMock(
+            return_value={"id": "00000000-0000-0000-0000-000000000001", "raw_text": "Note 1"}
         )
         reflection_repository.create_reflection = AsyncMock(
             return_value={
                 "id": "12345678-1234-5678-1234-567812345678",
                 "telegram_user_id": 123,
+                "voice_note_id": "00000000-0000-0000-0000-000000000001",
                 "question_type": "reflective",
                 "question_text": "What did you learn?",
                 "status": "pending",
@@ -59,64 +62,45 @@ class TestReflectionService:
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
             sources_repository=sources_repository,
             model=model,
+            note_selector_service=note_selector_service,
         )
 
         result = await service.start_reflection(123)
 
         assert isinstance(result, ReflectionQuestionResult)
-        assert result.question_type == "reflective"
-        assert result.question_text == "What did you learn?"
-        reflection_repository.create_reflection.assert_awaited_once()
+        note_selector_service.pick_note.assert_awaited_once_with("source-1")
 
     @pytest.mark.anyio
-    async def test_start_reflection_raises_no_active_source(self) -> None:
+    async def test_start_reflection_raises_all_notes_internalized(self) -> None:
+        """pick_note returns None → AllNotesInternalizedError raised."""
         reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
         sources_repository = AsyncMock()
-        model = MockChatOpenAI()
-
-        sources_repository.get_active_source = AsyncMock(return_value=None)
-
-        service = ReflectionService(
-            reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
-            sources_repository=sources_repository,
-            model=model,
-        )
-
-        with pytest.raises(NoActiveSourceError):
-            await service.start_reflection(123)
-
-    @pytest.mark.anyio
-    async def test_start_reflection_raises_no_notes(self) -> None:
-        reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
-        sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
         model = MockChatOpenAI()
 
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test"}
         )
-        voice_notes_repository.list_voice_notes = AsyncMock(return_value=[])
+        note_selector_service.pick_note = AsyncMock(return_value=None)
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
             sources_repository=sources_repository,
             model=model,
+            note_selector_service=note_selector_service,
         )
 
-        with pytest.raises(NoNotesError):
+        with pytest.raises(AllNotesInternalizedError):
             await service.start_reflection(123)
 
     @pytest.mark.anyio
-    async def test_start_reflection_cancels_existing_pending(self) -> None:
+    async def test_start_reflection_stores_voice_note_id(self) -> None:
+        """Verify create_reflection called with the selected note's ID."""
         reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
         sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
         model = MockChatOpenAI(
             response_content='{"question_type": "quiz", "question_text": "Test question"}'
         )
@@ -124,13 +108,14 @@ class TestReflectionService:
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test"}
         )
-        voice_notes_repository.list_voice_notes = AsyncMock(
-            return_value=[{"id": "note-1", "raw_text": "Note 1"}]
+        note_selector_service.pick_note = AsyncMock(
+            return_value={"id": "00000000-0000-0000-0000-000000000001", "raw_text": "Note 1"}
         )
         reflection_repository.create_reflection = AsyncMock(
             return_value={
                 "id": "22345678-1234-5678-1234-567812345678",
                 "telegram_user_id": 123,
+                "voice_note_id": "00000000-0000-0000-0000-000000000001",
                 "question_type": "quiz",
                 "question_text": "Test question",
                 "status": "pending",
@@ -139,9 +124,69 @@ class TestReflectionService:
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
             sources_repository=sources_repository,
             model=model,
+            note_selector_service=note_selector_service,
+        )
+
+        await service.start_reflection(123)
+
+        reflection_repository.create_reflection.assert_awaited_once()
+        call_kwargs = reflection_repository.create_reflection.call_args
+        assert call_kwargs[1]["voice_note_id"] == "00000000-0000-0000-0000-000000000001"
+
+    @pytest.mark.anyio
+    async def test_start_reflection_raises_no_active_source(self) -> None:
+        """No active source → NoActiveSourceError raised."""
+        reflection_repository = AsyncMock()
+        sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
+        model = MockChatOpenAI()
+
+        sources_repository.get_active_source = AsyncMock(return_value=None)
+
+        service = ReflectionService(
+            reflection_repository=reflection_repository,
+            sources_repository=sources_repository,
+            model=model,
+            note_selector_service=note_selector_service,
+        )
+
+        with pytest.raises(NoActiveSourceError):
+            await service.start_reflection(123)
+
+    @pytest.mark.anyio
+    async def test_start_reflection_cancels_existing_pending(self) -> None:
+        """start_reflection cancels any existing pending reflection first."""
+        reflection_repository = AsyncMock()
+        sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
+        model = MockChatOpenAI(
+            response_content='{"question_type": "quiz", "question_text": "Test question"}'
+        )
+
+        sources_repository.get_active_source = AsyncMock(
+            return_value={"id": "source-1", "source_name": "test"}
+        )
+        note_selector_service.pick_note = AsyncMock(
+            return_value={"id": "00000000-0000-0000-0000-000000000002", "raw_text": "Note 1"}
+        )
+        reflection_repository.create_reflection = AsyncMock(
+            return_value={
+                "id": "32345678-1234-5678-1234-567812345678",
+                "telegram_user_id": 123,
+                "voice_note_id": "00000000-0000-0000-0000-000000000002",
+                "question_type": "quiz",
+                "question_text": "Test question",
+                "status": "pending",
+            }
+        )
+
+        service = ReflectionService(
+            reflection_repository=reflection_repository,
+            sources_repository=sources_repository,
+            model=model,
+            note_selector_service=note_selector_service,
         )
 
         await service.start_reflection(123)
@@ -149,53 +194,11 @@ class TestReflectionService:
         reflection_repository.cancel_pending_reflection.assert_awaited_once_with(123)
 
     @pytest.mark.anyio
-    async def test_start_reflection_uses_fewer_than_5_notes(self) -> None:
+    async def test_complete_reflection_fetches_single_note(self) -> None:
+        """Verify note fetched by voice_note_id from pending reflection."""
         reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
         sources_repository = AsyncMock()
-        model = MockChatOpenAI(
-            response_content='{"question_type": "elaboration", "question_text": "Expand on this"}'
-        )
-
-        sources_repository.get_active_source = AsyncMock(
-            return_value={"id": "source-1", "source_name": "test"}
-        )
-        # Only 3 notes
-        voice_notes_repository.list_voice_notes = AsyncMock(
-            return_value=[
-                {"id": "note-1", "raw_text": "Note 1"},
-                {"id": "note-2", "raw_text": "Note 2"},
-                {"id": "note-3", "raw_text": "Note 3"},
-            ]
-        )
-        reflection_repository.create_reflection = AsyncMock(
-            return_value={
-                "id": "32345678-1234-5678-1234-567812345678",
-                "telegram_user_id": 123,
-                "question_type": "elaboration",
-                "question_text": "Expand on this",
-                "status": "pending",
-            }
-        )
-
-        service = ReflectionService(
-            reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
-            sources_repository=sources_repository,
-            model=model,
-        )
-
-        result = await service.start_reflection(123)
-
-        # Should not raise even with fewer than 5 notes
-        assert result.question_type == "elaboration"
-        voice_notes_repository.list_voice_notes.assert_awaited_once()
-
-    @pytest.mark.anyio
-    async def test_complete_reflection_rates_and_stores(self) -> None:
-        reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
-        sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
         model = MockChatOpenAI(
             response_content='{"rating": 8, "feedback": "Great answer!"}'
         )
@@ -203,7 +206,7 @@ class TestReflectionService:
         pending_reflection = {
             "id": "42345678-1234-5678-1234-567812345678",
             "telegram_user_id": 123,
-            "voice_note_id": None,
+            "voice_note_id": "00000000-0000-0000-0000-000000000003",
             "question_type": "reflective",
             "question_text": "What did you learn?",
             "answer_text": None,
@@ -214,19 +217,27 @@ class TestReflectionService:
             "completed_at": None,
         }
         reflection_repository.get_pending_reflection = AsyncMock(return_value=pending_reflection)
-        sources_repository.get_active_source = AsyncMock(
-            return_value={"id": "source-1", "source_name": "test"}
-        )
-        voice_notes_repository.list_voice_notes = AsyncMock(
-            return_value=[{"id": "note-1", "raw_text": "Note 1"}]
-        )
         reflection_repository.complete_reflection = AsyncMock()
+
+        # Mock the client.table(...).select(...).eq(...).maybe_single().execute() chain
+        mock_note_response = Mock()
+        mock_note_response.data = {"id": "00000000-0000-0000-0000-000000000003", "raw_text": "Note 1 content"}
+        mock_note_response.error = None
+        mock_eq_query = Mock()
+        mock_eq_query.select = Mock(return_value=mock_eq_query)
+        mock_eq_query.eq = Mock(return_value=mock_eq_query)
+        mock_eq_query.maybe_single = Mock(return_value=mock_eq_query)
+        mock_eq_query.execute = AsyncMock(return_value=mock_note_response)
+        mock_table = Mock()
+        mock_table.select = Mock(return_value=mock_eq_query)
+        reflection_repository._client = Mock()
+        reflection_repository._client.table = Mock(return_value=mock_table)
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
             sources_repository=sources_repository,
             model=model,
+            note_selector_service=note_selector_service,
         )
 
         result = await service.complete_reflection(123, "I learned a lot about testing")
@@ -238,18 +249,19 @@ class TestReflectionService:
 
     @pytest.mark.anyio
     async def test_complete_reflection_no_pending_raises(self) -> None:
+        """No pending reflection → NoNotesError raised."""
         reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
         sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
         model = MockChatOpenAI()
 
         reflection_repository.get_pending_reflection = AsyncMock(return_value=None)
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
             sources_repository=sources_repository,
             model=model,
+            note_selector_service=note_selector_service,
         )
 
         with pytest.raises(NoNotesError):
@@ -257,16 +269,17 @@ class TestReflectionService:
 
     @pytest.mark.anyio
     async def test_cancel_pending_reflection_delegates_to_repository(self) -> None:
+        """cancel_pending_reflection calls repository method."""
         reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
         sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
         model = MockChatOpenAI()
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
             sources_repository=sources_repository,
             model=model,
+            note_selector_service=note_selector_service,
         )
 
         await service.cancel_pending_reflection(123)
@@ -275,15 +288,16 @@ class TestReflectionService:
 
     @pytest.mark.anyio
     async def test_get_pending_reflection_returns_entry(self) -> None:
+        """get_pending_reflection returns ReflectionEntry."""
         reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
         sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
         model = MockChatOpenAI()
 
         pending_reflection = {
             "id": UUID("12345678-1234-5678-1234-567812345678"),
             "telegram_user_id": 123,
-            "voice_note_id": None,
+            "voice_note_id": "00000000-0000-0000-0000-000000000004",
             "question_type": "reflective",
             "question_text": "What did you learn?",
             "answer_text": None,
@@ -297,9 +311,9 @@ class TestReflectionService:
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
             sources_repository=sources_repository,
             model=model,
+            note_selector_service=note_selector_service,
         )
 
         result = await service.get_pending_reflection(123)
@@ -310,18 +324,19 @@ class TestReflectionService:
 
     @pytest.mark.anyio
     async def test_get_pending_reflection_returns_none_when_empty(self) -> None:
+        """get_pending_reflection returns None when no pending reflection."""
         reflection_repository = AsyncMock()
-        voice_notes_repository = AsyncMock()
         sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
         model = MockChatOpenAI()
 
         reflection_repository.get_pending_reflection = AsyncMock(return_value=None)
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
-            voice_notes_repository=voice_notes_repository,
             sources_repository=sources_repository,
             model=model,
+            note_selector_service=note_selector_service,
         )
 
         result = await service.get_pending_reflection(123)

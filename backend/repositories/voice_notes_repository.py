@@ -80,6 +80,7 @@ class VoiceNotesRepository:
         offset: int = 0,
         created_after: Optional[datetime] = None,
         created_before: Optional[datetime] = None,
+        order: str = "desc",
     ) -> list[dict[str, Any]]:
         query = self._client.table(self._table).select("*")
         if source_id:
@@ -88,7 +89,7 @@ class VoiceNotesRepository:
             query = query.gte("created_at", created_after.isoformat())
         if created_before:
             query = query.lte("created_at", created_before.isoformat())
-        query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
+        query = query.order("created_at", desc=(order == "desc")).range(offset, offset + limit - 1)
         response = await query.execute()
         self._raise_on_error(response)
         return self._list(response)
