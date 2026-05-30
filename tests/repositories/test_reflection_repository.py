@@ -26,6 +26,10 @@ class _StubQuery:
         self._filters.append((field, value))
         return self
 
+    def in_(self, field: str, values: list[Any]) -> _StubQuery:
+        self._filters.append((field, values))
+        return self
+
     def maybe_single(self) -> _StubQuery:
         return self
 
@@ -182,3 +186,51 @@ class TestReflectionRepository:
         assert stub_client.table_instance is not None
         assert stub_client.table_instance.update_payload is not None
         assert stub_client.table_instance.update_payload["status"] == "cancelled"
+
+    @pytest.mark.anyio
+    async def test_get_note_reflection_stats_returns_stats_for_completed_reflections(
+        self,
+    ) -> None:
+        """Verify aggregation of avg_rating and review_count per note_id."""
+        reflection_data = [
+            {"voice_note_id": "note-1", "rating": 8},
+            {"voice_note_id": "note-1", "rating": 9},
+            {"voice_note_id": "note-2", "rating": 7},
+        ]
+        response = _StubResponse(data=reflection_data)
+        stub_client = _StubClient(response)
+        repository = ReflectionRepository(client=stub_client)
+
+        result = await repository.get_note_reflection_stats("source-1", ["note-1", "note-2"])
+
+        assert result["note-1"]["avg_rating"] == 8.5
+        assert result["note-1"]["review_count"] == 2
+        assert result["note-2"]["avg_rating"] == 7.0
+        assert result["note-2"]["review_count"] == 1
+
+    @pytest.mark.anyio
+    async def test_get_note_reflection_stats_returns_empty_for_no_reflections(
+        self,
+    ) -> None:
+        """No completed reflections for given note IDs → empty dict."""
+        response = _StubResponse(data=None)
+        stub_client = _StubClient(response)
+        repository = ReflectionRepository(client=stub_client)
+
+        result = await repository.get_note_reflection_stats("source-1", ["note-1", "note-2"])
+
+        assert result == {}
+
+    @pytest.mark.anyio
+    async def test_get_note_reflection_stats_returns_empty_for_empty_note_ids(
+        self,
+    ) -> None:
+        """Empty note_ids list → empty dict."""
+        response = _StubResponse(data=None)
+        stub_client = _StubClient(response)
+        repository = ReflectionRepository(client=stub_client)
+
+        result = await repository.get_note_reflection_stats("source-1", [])
+
+        assert result == {}
+

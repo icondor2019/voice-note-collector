@@ -12,6 +12,7 @@ from backend.services.chat_mode_service import (
     ChatModeService,
 )
 from backend.services.reflection_service import (
+    AllNotesInternalizedError,
     NoActiveSourceError,
     NoNotesError,
     ReflectionService,
@@ -195,11 +196,20 @@ class TelegramCommandHandler:
     async def _handle_reflect(self, telegram_user_id: int) -> str:
         try:
             result = await self._reflection_service.start_reflection(telegram_user_id)
-            return f"🧠 {result.question_text}"
+            return f"{result.question_text}"
         except NoActiveSourceError:
             return "⚠️ No active source. Use /switch or /default to set one."
         except NoNotesError:
             return "⚠️ No notes found in your active source. Send some voice notes first!"
+        except AllNotesInternalizedError as exc:
+            source_name = "your source"
+            try:
+                active = await self._source_service.get_active_source()
+                if active:
+                    source_name = active["source_name"]
+            except Exception:
+                pass
+            return f"You've reviewed all notes from {source_name}! 🎉"
 
     def _handle_unknown_text(self) -> str:
         return UNKNOWN_TEXT

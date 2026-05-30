@@ -49,7 +49,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 - Label: A tag that can be applied to voice notes for organization and retrieval.
 - voice note details: Additional metadata about a voice note, such labels, title and processing status.
 - Chat memory: Per-user short-term conversation history stored in Supabase, scoped by telegram_user_id, used to provide context to the chat agent.
-- Reflection: A single-turn interaction where the bot asks a question based on recent notes from the active source, the user responds (text or voice), and the bot rates the response (1-10) with structured feedback in bullet-point format.
+- Reflection: A single-turn interaction where the bot asks a question based on a single note from the active source, the user responds (text or voice), and the bot rates the response (1-10). Notes are marked as "internalized" when meet a criteria
 
 ---
 
@@ -115,3 +115,4 @@ Main tables:
 | ChatAgentService | backend/services/chat_agent_service.py | LangGraph LLM agent (gpt-4o-mini) with per-user short-term memory (last 5 messages); handles agent-mode messages |
 | NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes |
 | ReflectionService | backend/services/reflection_service.py | Generates reflection questions via LLM, rates user responses (1-10), manages reflection state in Supabase |
+| NoteSelectorService | backend/services/note_selector_service.py | Selects a non-internalized note from a source's recent pool for reflection |

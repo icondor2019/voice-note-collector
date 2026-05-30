@@ -17,6 +17,7 @@ from backend.repositories.voice_note_details_repository import VoiceNoteDetailsR
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.chat_agent_service import ChatAgentService
+from backend.services.note_selector_service import NoteSelectorService
 from backend.services.reflection_service import ReflectionService
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
@@ -117,10 +118,20 @@ def get_reflection_repository(
     return ReflectionRepository(client=client)
 
 
+def get_note_selector_service(
+    voice_notes_repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
+    reflection_repository: ReflectionRepository = Depends(get_reflection_repository),
+) -> NoteSelectorService:
+    return NoteSelectorService(
+        voice_notes_repository=voice_notes_repository,
+        reflection_repository=reflection_repository,
+    )
+
+
 def get_reflection_service(
     reflection_repository: ReflectionRepository = Depends(get_reflection_repository),
-    voice_notes_repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
     sources_repository: SourcesRepository = Depends(get_sources_repository),
+    note_selector_service: NoteSelectorService = Depends(get_note_selector_service),
 ) -> ReflectionService:
     model = ChatOpenAI(
         model=settings.REFLECTION_LLM_MODEL,
@@ -128,9 +139,9 @@ def get_reflection_service(
     )
     return ReflectionService(
         reflection_repository=reflection_repository,
-        voice_notes_repository=voice_notes_repository,
         sources_repository=sources_repository,
         model=model,
+        note_selector_service=note_selector_service,
     )
 
 
