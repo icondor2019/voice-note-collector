@@ -22,7 +22,6 @@ class AgentState(TypedDict):
 
 
 class ChatAgentService:
-    MAX_MEMORY_MESSAGES = 10
 
     def __init__(
         self,
@@ -30,7 +29,7 @@ class ChatAgentService:
         max_memory_messages: int = settings.AGENT_MAX_MEMORY_MESSAGES,
     ) -> None:
         self._model = ChatOpenAI(
-            model="gpt-4o-mini",
+            model= settings.AGENT_LLM_MODEL,
             api_key=settings.OPENAI_API_KEY,
         )
         self._memory_repository = memory_repository

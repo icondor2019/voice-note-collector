@@ -12,6 +12,7 @@ from backend.models.reflection import (
     ReflectionEntry,
     ReflectionQuestionResult,
     ReflectionRatingResult,
+    ReflectionSummary,
 )
 from backend.repositories.reflection_repository import ReflectionRepository
 from backend.repositories.sources_repository import SourcesRepository
@@ -276,6 +277,30 @@ class ReflectionService:
         if not row:
             return None
         return ReflectionEntry(**row)
+
+    async def get_reflection_summary(self, telegram_user_id: int) -> ReflectionSummary:
+        """Get reflection summary for the active source.
+
+        Returns ReflectionSummary with counts and source name.
+        Raises NoActiveSourceError if no active source.
+        """
+        active_source = await self._sources_repository.get_active_source()
+        if not active_source:
+            raise NoActiveSourceError("No active source found for user")
+
+        stats = await self._reflection_repository.get_reflection_summary(
+            source_id=active_source["id"],
+            min_reviews=settings.REFLECTION_MIN_REVIEWS,
+            min_avg_score=settings.REFLECTION_MIN_AVG_SCORE,
+        )
+
+        return ReflectionSummary(
+            source_name=active_source["source_name"],
+            total_notes=stats["total_notes"],
+            internalized=stats["internalized"],
+            in_progress=stats["in_progress"],
+            pending=stats["pending"],
+        )
 
     async def _generate_question(self, note: dict[str, Any]) -> tuple[str, str]:
         """Call LLM to generate a reflection question based on a single note."""

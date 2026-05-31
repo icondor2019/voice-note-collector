@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from backend.services.note_selector_service import NoteSelectorService
+from configuration.settings import settings
 
 
 class TestNoteSelectorService:
@@ -47,7 +48,7 @@ class TestNoteSelectorService:
         assert result is not None
         assert result["id"] in ["note-3", "note-4", "note-5"]
         voice_notes_repository.list_voice_notes.assert_awaited_once_with(
-            source_id="source-1", limit=5, order="asc"
+            source_id="source-1", limit=settings.REFLECTION_NOTES_COUNT, order="asc"
         )
 
     @pytest.mark.anyio
@@ -199,7 +200,7 @@ class TestNoteSelectorService:
         await service.pick_note("source-1")
 
         voice_notes_repository.list_voice_notes.assert_awaited_once_with(
-            source_id="source-1", limit=5, order="asc"
+            source_id="source-1", limit=settings.REFLECTION_NOTES_COUNT, order="asc"
         )
 
     @pytest.mark.anyio
@@ -219,5 +220,5 @@ class TestNoteSelectorService:
         await service.pick_note("source-1")
 
         voice_notes_repository.list_voice_notes.assert_awaited_once_with(
-            source_id="source-1", limit=5, order="asc"
+            source_id="source-1", limit=settings.REFLECTION_NOTES_COUNT, order="asc"
         )

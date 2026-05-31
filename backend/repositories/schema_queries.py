@@ -92,3 +92,41 @@ ON reflections (telegram_user_id, status);
 CREATE INDEX IF NOT EXISTS reflections_user_created_idx
 ON reflections (telegram_user_id, created_at DESC);
 """
+
+# Reflection summary RPC function
+CREATE_REFLECTION_SUMMARY_FUNCTION_QUERY = """
+CREATE OR REPLACE FUNCTION get_reflection_summary(
+  p_source_id      UUID,
+  p_min_reviews    INT,
+  p_min_avg_score  NUMERIC
+)
+RETURNS TABLE (
+  total_notes   BIGINT,
+  internalized  BIGINT,
+  in_progress   BIGINT,
+  pending       BIGINT
+)
+LANGUAGE sql STABLE AS $$
+  WITH note_stats AS (
+    SELECT
+      vn.id,
+      COUNT(r.id)   FILTER (WHERE r.status = 'completed') AS review_count,
+      AVG(r.rating) FILTER (WHERE r.status = 'completed') AS avg_rating
+    FROM voice_notes vn
+    LEFT JOIN reflections r ON r.voice_note_id = vn.id
+    WHERE vn.source_id = p_source_id
+    GROUP BY vn.id
+  )
+  SELECT
+    COUNT(*)
+      AS total_notes,
+    COUNT(*) FILTER (WHERE review_count >= p_min_reviews AND avg_rating >= p_min_avg_score)
+      AS internalized,
+    COUNT(*) FILTER (WHERE review_count > 0
+      AND NOT (review_count >= p_min_reviews AND avg_rating >= p_min_avg_score))
+      AS in_progress,
+    COUNT(*) FILTER (WHERE review_count = 0)
+      AS pending
+  FROM note_stats;
+$$;
+"""

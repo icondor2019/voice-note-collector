@@ -68,6 +68,7 @@ class Settings(BaseSettings):
 
     # agent max lenght record
     AGENT_MAX_MEMORY_MESSAGES: int = 10
+    AGENT_LLM_MODEL: str = "gpt-4o-mini"
 
     # Reflection settings
     REFLECTION_NOTES_COUNT: int = 10
