@@ -9,7 +9,7 @@ from uuid import UUID
 
 import pytest
 
-from backend.models.reflection import ReflectionEntry, ReflectionQuestionResult, ReflectionRatingResult
+from backend.models.reflection import ReflectionEntry, ReflectionQuestionResult, ReflectionRatingResult, ReflectionSummary
 from backend.services.reflection_service import (
     AllNotesInternalizedError,
     NoActiveSourceError,
@@ -342,3 +342,137 @@ class TestReflectionServiceWithNoteSelector:
         result = await service.get_pending_reflection(123)
 
         assert result is None
+
+
+class TestReflectionServiceGetReflectionSummary:
+    """Tests for ReflectionService.get_reflection_summary()."""
+
+    @pytest.mark.anyio
+    async def test_get_reflection_summary_returns_correct_model(self) -> None:
+        """Verify ReflectionSummary is correctly populated from repository."""
+        reflection_repository = AsyncMock()
+        sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
+        model = MockChatOpenAI()
+
+        sources_repository.get_active_source = AsyncMock(
+            return_value={"id": "source-1", "source_name": "test-source"}
+        )
+        reflection_repository.get_reflection_summary = AsyncMock(
+            return_value={
+                "total_notes": 10,
+                "internalized": 3,
+                "in_progress": 4,
+                "pending": 3,
+            }
+        )
+
+        service = ReflectionService(
+            reflection_repository=reflection_repository,
+            sources_repository=sources_repository,
+            model=model,
+            note_selector_service=note_selector_service,
+        )
+
+        result = await service.get_reflection_summary(123)
+
+        assert isinstance(result, ReflectionSummary)
+        assert result.source_name == "test-source"
+        assert result.total_notes == 10
+        assert result.internalized == 3
+        assert result.in_progress == 4
+        assert result.pending == 3
+        # Verify the invariant
+        assert result.internalized + result.in_progress + result.pending == result.total_notes
+
+    @pytest.mark.anyio
+    async def test_get_reflection_summary_no_active_source(self) -> None:
+        """get_active_source() returns None → NoActiveSourceError raised."""
+        reflection_repository = AsyncMock()
+        sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
+        model = MockChatOpenAI()
+
+        sources_repository.get_active_source = AsyncMock(return_value=None)
+
+        service = ReflectionService(
+            reflection_repository=reflection_repository,
+            sources_repository=sources_repository,
+            model=model,
+            note_selector_service=note_selector_service,
+        )
+
+        with pytest.raises(NoActiveSourceError):
+            await service.get_reflection_summary(123)
+
+    @pytest.mark.anyio
+    async def test_get_reflection_summary_zero_notes(self) -> None:
+        """RPC returns all zeros → ReflectionSummary with all zeros."""
+        reflection_repository = AsyncMock()
+        sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
+        model = MockChatOpenAI()
+
+        sources_repository.get_active_source = AsyncMock(
+            return_value={"id": "source-1", "source_name": "empty-source"}
+        )
+        reflection_repository.get_reflection_summary = AsyncMock(
+            return_value={
+                "total_notes": 0,
+                "internalized": 0,
+                "in_progress": 0,
+                "pending": 0,
+            }
+        )
+
+        service = ReflectionService(
+            reflection_repository=reflection_repository,
+            sources_repository=sources_repository,
+            model=model,
+            note_selector_service=note_selector_service,
+        )
+
+        result = await service.get_reflection_summary(123)
+
+        assert isinstance(result, ReflectionSummary)
+        assert result.total_notes == 0
+        assert result.internalized == 0
+        assert result.in_progress == 0
+        assert result.pending == 0
+
+    @pytest.mark.anyio
+    async def test_get_reflection_summary_uses_settings_thresholds(self) -> None:
+        """Verify repository is called with settings thresholds (not hardcoded)."""
+        from configuration.settings import settings
+
+        reflection_repository = AsyncMock()
+        sources_repository = AsyncMock()
+        note_selector_service = AsyncMock()
+        model = MockChatOpenAI()
+
+        sources_repository.get_active_source = AsyncMock(
+            return_value={"id": "source-1", "source_name": "test"}
+        )
+        reflection_repository.get_reflection_summary = AsyncMock(
+            return_value={
+                "total_notes": 5,
+                "internalized": 1,
+                "in_progress": 2,
+                "pending": 2,
+            }
+        )
+
+        service = ReflectionService(
+            reflection_repository=reflection_repository,
+            sources_repository=sources_repository,
+            model=model,
+            note_selector_service=note_selector_service,
+        )
+
+        await service.get_reflection_summary(123)
+
+        reflection_repository.get_reflection_summary.assert_awaited_once_with(
+            source_id="source-1",
+            min_reviews=settings.REFLECTION_MIN_REVIEWS,
+            min_avg_score=settings.REFLECTION_MIN_AVG_SCORE,
+        )

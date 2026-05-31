@@ -44,6 +44,7 @@ HELP_MESSAGE = (
     "✅ /current — show active source and mode\n"
     "⚙️ /default — set default source\n"
     "🧠 /reflect — start a reflection question\n"
+    "🔢 /reflect stats — show internalization progress\n"
     "❓ /help — show this message\n\n"
     "⚙️ Commands that require arguments:\n\n"
     "➕ /create <name> — create a new source\n"
@@ -97,7 +98,7 @@ class TelegramCommandHandler:
         elif command == "/label":
             reply = await self._handle_label(argument)
         elif command == "/reflect":
-            reply = await self._handle_reflect(from_user_id)
+            reply = await self._handle_reflect(from_user_id, argument)
         elif command == "/agent":
             reply = self._handle_agent_mode()
         elif command == "/note":
@@ -193,7 +194,10 @@ class TelegramCommandHandler:
         logger.info("telegram.command.label", extra={"name": name})
         return LABEL_SUCCESS.format(name=name)
 
-    async def _handle_reflect(self, telegram_user_id: int) -> str:
+    async def _handle_reflect(self, telegram_user_id: int, argument: str = "") -> str:
+        if argument == "stats":
+            return await self._handle_reflect_stats()
+
         try:
             result = await self._reflection_service.start_reflection(telegram_user_id)
             return f"{result.question_text}"
@@ -210,6 +214,28 @@ class TelegramCommandHandler:
             except Exception:
                 pass
             return f"You've reviewed all notes from {source_name}! 🎉"
+
+    async def _handle_reflect_stats(self) -> str:
+        """Handle /reflect stats command - return reflection summary for active source."""
+        try:
+            summary = await self._reflection_service.get_reflection_summary(None)
+            if summary.total_notes == 0:
+                return "📊 No notes yet in your active source."
+
+            total = summary.total_notes
+            internalized_pct = round(summary.internalized / total * 100) if total > 0 else 0
+            in_progress_pct = round(summary.in_progress / total * 100) if total > 0 else 0
+            pending_pct = round(summary.pending / total * 100) if total > 0 else 0
+
+            return (
+                f"📊 {summary.source_name} · Reflection Stats\n\n"
+                f"📝 Total notes: {total}\n"
+                f"✅ Internalized: {summary.internalized} ({internalized_pct}%)\n"
+                f"🔄 In progress: {summary.in_progress} ({in_progress_pct}%)\n"
+                f"⏳ Pending: {summary.pending} ({pending_pct}%)"
+            )
+        except NoActiveSourceError:
+            return "⚠️ No active source. Use /switch or /default to set one."
 
     def _handle_unknown_text(self) -> str:
         return UNKNOWN_TEXT

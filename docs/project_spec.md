@@ -30,6 +30,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 * Simple label system for notes
 * Dual-mode Telegram bot: note mode (default) and agent mode (LLM-powered via LangGraph + gpt-4o-mini)
 * Reflection Agent: `/reflect` slash command that asks a question based on last 5 notes from active source, rates the user's response (1-10), and provides structured feedback
+* Reflection stats: `/reflect stats` subcommand showing internalization progress per active source
 
 ### Excluded (for now)
 
@@ -114,5 +115,5 @@ Main tables:
 | ChatModeService | backend/services/chat_mode_service.py | Global in-memory flag for note/agent mode toggle |
 | ChatAgentService | backend/services/chat_agent_service.py | LangGraph LLM agent (gpt-4o-mini) with per-user short-term memory (last 5 messages); handles agent-mode messages |
 | NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes |
-| ReflectionService | backend/services/reflection_service.py | Generates reflection questions via LLM, rates user responses (1-10), manages reflection state in Supabase |
+| ReflectionService | backend/services/reflection_service.py | Generates reflection questions via LLM, rates user responses (1-10), manages reflection state in Supabase, provides internalization stats via get_reflection_summary() |
 | NoteSelectorService | backend/services/note_selector_service.py | Selects a non-internalized note from a source's recent pool for reflection |

@@ -135,6 +135,37 @@ class ReflectionRepository:
         )
         self._raise_on_error(response, allow_none_response=True)
 
+    async def get_reflection_summary(
+        self, source_id: str, min_reviews: int, min_avg_score: float
+    ) -> dict[str, int]:
+        """Get reflection summary for a source via RPC call.
+
+        Returns dict with keys: total_notes, internalized, in_progress, pending.
+        Returns all-zero dict if RPC response has no data.
+        """
+        response = (
+            await self._client.rpc(
+                "get_reflection_summary",
+                {
+                    "p_source_id": source_id,
+                    "p_min_reviews": min_reviews,
+                    "p_min_avg_score": min_avg_score,
+                },
+            ).execute()
+        )
+        self._raise_on_error(response, allow_none_response=True)
+
+        if not response or not response.data:
+            return {"total_notes": 0, "internalized": 0, "in_progress": 0, "pending": 0}
+
+        row = response.data[0]
+        return {
+            "total_notes": int(row.get("total_notes", 0)),
+            "internalized": int(row.get("internalized", 0)),
+            "in_progress": int(row.get("in_progress", 0)),
+            "pending": int(row.get("pending", 0)),
+        }
+
     @staticmethod
     def _raise_on_error(response: Any, allow_none_response: bool = False) -> None:
         if response is None:

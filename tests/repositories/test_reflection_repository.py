@@ -234,3 +234,100 @@ class TestReflectionRepository:
 
         assert result == {}
 
+
+class _StubRpcQuery:
+    """Stub for supabase.rpc().execute() chain."""
+
+    def __init__(self, response: _StubResponse) -> None:
+        self._response = response
+
+    async def execute(self) -> _StubResponse:
+        return self._response
+
+
+class _StubRpc:
+    """Stub for supabase.rpc() method."""
+
+    def __init__(self, response: _StubResponse) -> None:
+        self._response = response
+
+    def __call__(self, fn_name: str, params: dict[str, Any]) -> _StubRpcQuery:
+        self._called_fn = fn_name
+        self._called_params = params
+        return _StubRpcQuery(self._response)
+
+
+class TestReflectionRepositoryGetReflectionSummary:
+    """Tests for ReflectionRepository.get_reflection_summary()."""
+
+    @pytest.mark.anyio
+    async def test_get_reflection_summary_returns_counts(self) -> None:
+        """Verify RPC call returns correctly structured dict."""
+        rpc_response = _StubResponse(
+            data=[
+                {
+                    "total_notes": 10,
+                    "internalized": 3,
+                    "in_progress": 4,
+                    "pending": 3,
+                }
+            ]
+        )
+        stub_rpc = _StubRpc(rpc_response)
+        stub_client = _StubClient(rpc_response)
+        stub_client.rpc = stub_rpc
+        repository = ReflectionRepository(client=stub_client)
+
+        result = await repository.get_reflection_summary(
+            source_id="source-1",
+            min_reviews=3,
+            min_avg_score=7.0,
+        )
+
+        assert result["total_notes"] == 10
+        assert result["internalized"] == 3
+        assert result["in_progress"] == 4
+        assert result["pending"] == 3
+        # Verify invariant
+        assert result["internalized"] + result["in_progress"] + result["pending"] == result["total_notes"]
+
+    @pytest.mark.anyio
+    async def test_get_reflection_summary_returns_zero_dict_when_empty(self) -> None:
+        """RPC returns no data → all-zero dict."""
+        rpc_response = _StubResponse(data=[])
+        stub_rpc = _StubRpc(rpc_response)
+        stub_client = _StubClient(rpc_response)
+        stub_client.rpc = stub_rpc
+        repository = ReflectionRepository(client=stub_client)
+
+        result = await repository.get_reflection_summary(
+            source_id="source-1",
+            min_reviews=3,
+            min_avg_score=7.0,
+        )
+
+        assert result["total_notes"] == 0
+        assert result["internalized"] == 0
+        assert result["in_progress"] == 0
+        assert result["pending"] == 0
+
+    @pytest.mark.anyio
+    async def test_get_reflection_summary_passes_correct_params(self) -> None:
+        """Verify RPC called with correct p_source_id, p_min_reviews, p_min_avg_score."""
+        rpc_response = _StubResponse(data=[{"total_notes": 5, "internalized": 1, "in_progress": 2, "pending": 2}])
+        stub_rpc = _StubRpc(rpc_response)
+        stub_client = _StubClient(rpc_response)
+        stub_client.rpc = stub_rpc
+        repository = ReflectionRepository(client=stub_client)
+
+        await repository.get_reflection_summary(
+            source_id="abc-123",
+            min_reviews=5,
+            min_avg_score=8.0,
+        )
+
+        assert stub_rpc._called_fn == "get_reflection_summary"
+        assert stub_rpc._called_params["p_source_id"] == "abc-123"
+        assert stub_rpc._called_params["p_min_reviews"] == 5
+        assert stub_rpc._called_params["p_min_avg_score"] == 8.0
+

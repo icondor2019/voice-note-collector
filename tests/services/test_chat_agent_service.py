@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from configuration.settings import settings
+
 from backend.models.chat_memory import ChatMemoryEntry
 from backend.services.chat_agent_service import (
     AGENT_ERROR_RESPONSE,
@@ -186,5 +188,5 @@ async def test_max_memory_messages_respected() -> None:
     await service.get_response("hello", telegram_user_id=123)
 
     memory_repo.get_last_n_messages.assert_awaited_once_with(
-        123, ChatAgentService.MAX_MEMORY_MESSAGES
+        123, settings.AGENT_MAX_MEMORY_MESSAGES
     )

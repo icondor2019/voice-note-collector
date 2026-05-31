@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from backend.models.reflection import ReflectionSummary
 from backend.services.chat_mode_service import (
     AGENT_MODE_ACTIVATED,
     NOTE_MODE_ACTIVATED,
@@ -386,3 +387,122 @@ async def test_message_handler_audio_path_unaffected() -> None:
 
     command_handler.handle_text.assert_not_called()
     assert result["message_type"] == "voice"
+
+
+@pytest.mark.anyio
+async def test_handle_reflect_stats_command_formatted_reply() -> None:
+    """Verify /reflect stats returns formatted summary with source name and percentages."""
+    source_service = AsyncMock()
+    reflection_service = AsyncMock()
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+
+    reflection_service.get_reflection_summary = AsyncMock(
+        return_value=ReflectionSummary(
+            source_name="my-source",
+            total_notes=10,
+            internalized=3,
+            in_progress=4,
+            pending=3,
+        )
+    )
+
+    handler = TelegramCommandHandler(
+        source_service, bot_client, labels_repository, ChatModeService(), reflection_service
+    )
+
+    reply = await handler.handle_text("/reflect stats", chat_id=123)
+
+    assert "📊" in reply
+    assert "my-source" in reply
+    assert "Total notes: 10" in reply
+    assert "Internalized: 3" in reply
+    assert "In progress: 4" in reply
+    assert "Pending: 3" in reply
+    assert "30%" in reply  # 3/10 = 30%
+    assert "40%" in reply  # 4/10 = 40%
+    assert "30%" in reply  # 3/10 = 30%
+
+
+@pytest.mark.anyio
+async def test_handle_reflect_no_argument_starts_reflection() -> None:
+    """Verify /reflect with no argument starts a reflection (no regression)."""
+    from unittest.mock import Mock
+
+    source_service = AsyncMock()
+    reflection_service = AsyncMock()
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+
+    # Mock start_reflection to return a question result
+    question_result_mock = Mock()
+    question_result_mock.question_text = "What did you learn?"
+    reflection_service.start_reflection = AsyncMock(return_value=question_result_mock)
+
+    handler = TelegramCommandHandler(
+        source_service, bot_client, labels_repository, ChatModeService(), reflection_service
+    )
+
+    reply = await handler.handle_text("/reflect", chat_id=123)
+
+    reflection_service.start_reflection.assert_awaited_once()
+    assert "What did you learn?" in reply
+
+
+@pytest.mark.anyio
+async def test_handle_reflect_stats_no_active_source_message() -> None:
+    """Assert error message returned when no active source."""
+    from backend.services.reflection_service import NoActiveSourceError
+
+    source_service = AsyncMock()
+    reflection_service = AsyncMock()
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+
+    reflection_service.get_reflection_summary = AsyncMock(
+        side_effect=NoActiveSourceError("No active source")
+    )
+
+    handler = TelegramCommandHandler(
+        source_service, bot_client, labels_repository, ChatModeService(), reflection_service
+    )
+
+    reply = await handler.handle_text("/reflect stats", chat_id=123)
+
+    assert "⚠️" in reply
+    assert "No active source" in reply
+
+
+@pytest.mark.anyio
+async def test_handle_reflect_stats_zero_notes_message() -> None:
+    """Assert friendly message when no notes yet in active source."""
+    source_service = AsyncMock()
+    reflection_service = AsyncMock()
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+
+    reflection_service.get_reflection_summary = AsyncMock(
+        return_value=ReflectionSummary(
+            source_name="my-source",
+            total_notes=0,
+            internalized=0,
+            in_progress=0,
+            pending=0,
+        )
+    )
+
+    handler = TelegramCommandHandler(
+        source_service, bot_client, labels_repository, ChatModeService(), reflection_service
+    )
+
+    reply = await handler.handle_text("/reflect stats", chat_id=123)
+
+    assert "📊" in reply
+    assert "No notes yet" in reply
+
+
+@pytest.mark.anyio
+async def test_help_message_includes_reflect_stats() -> None:
+    """Assert HELP_MESSAGE includes /reflect stats entry."""
+    assert "/reflect stats" in HELP_MESSAGE
+    assert "show internalization progress" in HELP_MESSAGE

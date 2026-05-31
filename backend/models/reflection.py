@@ -34,3 +34,13 @@ class ReflectionRatingResult(BaseModel):
 
     rating: int
     feedback: str
+
+
+class ReflectionSummary(BaseModel):
+    """Summary of reflection stats for a source."""
+
+    source_name: str
+    total_notes: int
+    internalized: int
+    in_progress: int
+    pending: int
