@@ -334,7 +334,7 @@ async def test_message_handler_routes_text_to_command_handler() -> None:
         command_handler=command_handler,
         bot_client=bot_client,
         chat_mode_service=ChatModeService(),
-        chat_agent_service=AsyncMock(),
+        multi_agent_service=AsyncMock(),
         reflection_service=reflection_service,
     )
     update = {
@@ -379,7 +379,7 @@ async def test_message_handler_audio_path_unaffected() -> None:
         command_handler=command_handler,
         bot_client=bot_client,
         chat_mode_service=ChatModeService(),
-        chat_agent_service=AsyncMock(),
+        multi_agent_service=AsyncMock(),
         reflection_service=reflection_service,
     )
 

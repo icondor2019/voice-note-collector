@@ -11,6 +11,8 @@ from backend.services.chat_mode_service import (
     NOTE_MODE_ACTIVATED,
     ChatModeService,
 )
+
+REFLECT_MODE_ACTIVATED = "🧠 Reflect mode activated"
 from backend.services.reflection_service import (
     AllNotesInternalizedError,
     NoActiveSourceError,
@@ -55,6 +57,7 @@ HELP_MESSAGE = (
 MODE_DISPLAY_NAMES = {
     "agent": "agent",
     "note": "note",
+    "reflect": "reflect",
 }
 
 
@@ -200,6 +203,7 @@ class TelegramCommandHandler:
 
         try:
             result = await self._reflection_service.start_reflection(telegram_user_id)
+            self._chat_mode_service.set_mode("reflect")
             return f"{result.question_text}"
         except NoActiveSourceError:
             return "⚠️ No active source. Use /switch or /default to set one."

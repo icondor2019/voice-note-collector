@@ -3,31 +3,25 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 import pytest
 
-from backend.models.reflection import ReflectionEntry, ReflectionQuestionResult, ReflectionRatingResult, ReflectionSummary
+from backend.models.agent import AgentResult
+from backend.models.reflection import (
+    ReflectionEntry,
+    ReflectionQuestionResult,
+    ReflectionRatingResult,
+    ReflectionSummary,
+)
 from backend.services.reflection_service import (
     AllNotesInternalizedError,
     NoActiveSourceError,
     NoNotesError,
     ReflectionService,
 )
-
-
-class MockChatOpenAI:
-    """Mock ChatOpenAI model for testing."""
-
-    def __init__(self, response_content: str = "") -> None:
-        self._response_content = response_content
-
-    def invoke(self, prompt: str) -> Mock:
-        mock_response = Mock()
-        mock_response.content = self._response_content
-        return mock_response
 
 
 class TestReflectionServiceWithNoteSelector:
@@ -39,15 +33,24 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI(
-            response_content='{"question_type": "reflective", "question_text": "What did you learn?"}'
+        question_agent = AsyncMock()
+        question_agent.run = AsyncMock(
+            return_value=AgentResult(
+                reply="What did you learn?",
+                outcome="asked",
+                updates={"question_type": "reflective", "question_text": "What did you learn?"},
+            )
         )
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test"}
         )
         note_selector_service.pick_note = AsyncMock(
-            return_value={"id": "00000000-0000-0000-0000-000000000001", "raw_text": "Note 1"}
+            return_value={
+                "id": "00000000-0000-0000-0000-000000000001",
+                "raw_text": "Note 1",
+            }
         )
         reflection_repository.create_reflection = AsyncMock(
             return_value={
@@ -63,8 +66,9 @@ class TestReflectionServiceWithNoteSelector:
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         result = await service.start_reflection(123)
@@ -78,7 +82,8 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test"}
@@ -88,8 +93,9 @@ class TestReflectionServiceWithNoteSelector:
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         with pytest.raises(AllNotesInternalizedError):
@@ -101,15 +107,24 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI(
-            response_content='{"question_type": "quiz", "question_text": "Test question"}'
+        question_agent = AsyncMock()
+        question_agent.run = AsyncMock(
+            return_value=AgentResult(
+                reply="Test question",
+                outcome="asked",
+                updates={"question_type": "quiz", "question_text": "Test question"},
+            )
         )
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test"}
         )
         note_selector_service.pick_note = AsyncMock(
-            return_value={"id": "00000000-0000-0000-0000-000000000001", "raw_text": "Note 1"}
+            return_value={
+                "id": "00000000-0000-0000-0000-000000000001",
+                "raw_text": "Note 1",
+            }
         )
         reflection_repository.create_reflection = AsyncMock(
             return_value={
@@ -125,15 +140,19 @@ class TestReflectionServiceWithNoteSelector:
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         await service.start_reflection(123)
 
         reflection_repository.create_reflection.assert_awaited_once()
         call_kwargs = reflection_repository.create_reflection.call_args
-        assert call_kwargs[1]["voice_note_id"] == "00000000-0000-0000-0000-000000000001"
+        assert (
+            call_kwargs[1]["voice_note_id"]
+            == "00000000-0000-0000-0000-000000000001"
+        )
 
     @pytest.mark.anyio
     async def test_start_reflection_raises_no_active_source(self) -> None:
@@ -141,15 +160,17 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(return_value=None)
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         with pytest.raises(NoActiveSourceError):
@@ -161,15 +182,24 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI(
-            response_content='{"question_type": "quiz", "question_text": "Test question"}'
+        question_agent = AsyncMock()
+        question_agent.run = AsyncMock(
+            return_value=AgentResult(
+                reply="Test question",
+                outcome="asked",
+                updates={"question_type": "quiz", "question_text": "Test question"},
+            )
         )
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test"}
         )
         note_selector_service.pick_note = AsyncMock(
-            return_value={"id": "00000000-0000-0000-0000-000000000002", "raw_text": "Note 1"}
+            return_value={
+                "id": "00000000-0000-0000-0000-000000000002",
+                "raw_text": "Note 1",
+            }
         )
         reflection_repository.create_reflection = AsyncMock(
             return_value={
@@ -185,8 +215,9 @@ class TestReflectionServiceWithNoteSelector:
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         await service.start_reflection(123)
@@ -199,12 +230,18 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI(
-            response_content='{"rating": 8, "feedback": "Great answer!"}'
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
+        scorer_agent.run = AsyncMock(
+            return_value=AgentResult(
+                reply="Great answer!",
+                outcome="scored",
+                updates={"rating": 8},
+            )
         )
 
         pending_reflection = {
-            "id": "42345678-1234-5678-1234-567812345678",
+            "id": UUID("42345678-1234-5678-1234-567812345678"),
             "telegram_user_id": 123,
             "voice_note_id": "00000000-0000-0000-0000-000000000003",
             "question_type": "reflective",
@@ -216,12 +253,17 @@ class TestReflectionServiceWithNoteSelector:
             "created_at": datetime.now(timezone.utc),
             "completed_at": None,
         }
-        reflection_repository.get_pending_reflection = AsyncMock(return_value=pending_reflection)
+        reflection_repository.get_pending_reflection = AsyncMock(
+            return_value=pending_reflection
+        )
         reflection_repository.complete_reflection = AsyncMock()
 
         # Mock the client.table(...).select(...).eq(...).maybe_single().execute() chain
         mock_note_response = Mock()
-        mock_note_response.data = {"id": "00000000-0000-0000-0000-000000000003", "raw_text": "Note 1 content"}
+        mock_note_response.data = {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "raw_text": "Note 1 content",
+        }
         mock_note_response.error = None
         mock_eq_query = Mock()
         mock_eq_query.select = Mock(return_value=mock_eq_query)
@@ -236,8 +278,9 @@ class TestReflectionServiceWithNoteSelector:
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         result = await service.complete_reflection(123, "I learned a lot about testing")
@@ -253,15 +296,17 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         reflection_repository.get_pending_reflection = AsyncMock(return_value=None)
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         with pytest.raises(NoNotesError):
@@ -273,13 +318,15 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         await service.cancel_pending_reflection(123)
@@ -292,7 +339,8 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         pending_reflection = {
             "id": UUID("12345678-1234-5678-1234-567812345678"),
@@ -307,13 +355,16 @@ class TestReflectionServiceWithNoteSelector:
             "created_at": datetime.now(timezone.utc),
             "completed_at": None,
         }
-        reflection_repository.get_pending_reflection = AsyncMock(return_value=pending_reflection)
+        reflection_repository.get_pending_reflection = AsyncMock(
+            return_value=pending_reflection
+        )
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         result = await service.get_pending_reflection(123)
@@ -328,15 +379,17 @@ class TestReflectionServiceWithNoteSelector:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         reflection_repository.get_pending_reflection = AsyncMock(return_value=None)
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         result = await service.get_pending_reflection(123)
@@ -353,7 +406,8 @@ class TestReflectionServiceGetReflectionSummary:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test-source"}
@@ -370,8 +424,9 @@ class TestReflectionServiceGetReflectionSummary:
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         result = await service.get_reflection_summary(123)
@@ -383,7 +438,10 @@ class TestReflectionServiceGetReflectionSummary:
         assert result.in_progress == 4
         assert result.pending == 3
         # Verify the invariant
-        assert result.internalized + result.in_progress + result.pending == result.total_notes
+        assert (
+            result.internalized + result.in_progress + result.pending
+            == result.total_notes
+        )
 
     @pytest.mark.anyio
     async def test_get_reflection_summary_no_active_source(self) -> None:
@@ -391,15 +449,17 @@ class TestReflectionServiceGetReflectionSummary:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(return_value=None)
 
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         with pytest.raises(NoActiveSourceError):
@@ -411,7 +471,8 @@ class TestReflectionServiceGetReflectionSummary:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "empty-source"}
@@ -428,8 +489,9 @@ class TestReflectionServiceGetReflectionSummary:
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         result = await service.get_reflection_summary(123)
@@ -448,7 +510,8 @@ class TestReflectionServiceGetReflectionSummary:
         reflection_repository = AsyncMock()
         sources_repository = AsyncMock()
         note_selector_service = AsyncMock()
-        model = MockChatOpenAI()
+        question_agent = AsyncMock()
+        scorer_agent = AsyncMock()
 
         sources_repository.get_active_source = AsyncMock(
             return_value={"id": "source-1", "source_name": "test"}
@@ -465,8 +528,9 @@ class TestReflectionServiceGetReflectionSummary:
         service = ReflectionService(
             reflection_repository=reflection_repository,
             sources_repository=sources_repository,
-            model=model,
             note_selector_service=note_selector_service,
+            question_agent=question_agent,
+            scorer_agent=scorer_agent,
         )
 
         await service.get_reflection_summary(123)

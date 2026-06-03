@@ -5,7 +5,7 @@ Goal
 Define module structure, controller (router) aggregator pattern, service boundaries and simple implementation rules so backend contributors can implement features consistently.
 
 Project layout (recommended)
----------------------------
+--------------------------
 
 src/
   app/
@@ -17,6 +17,11 @@ src/
       frontend.py          # minimal UI endpoints
     services/              # business logic
       __init__.py
+      agents/              # sub-agents for reflection (multi-agent flow)
+        question_agent.py  # generates reflection questions
+        scorer_agent.py    # rates answers 1-10
+        hint_agent.py      # Socratic hints in note language
+      multi_agent_service.py  # supervisor + sub-graphs (chat, reflection)
       telegram_ingest.py   # ingest/update processing, idempotency (uses chat_id:message_id for Step 2)
       voice_notes.py       # metadata composition + domain rules
       storage.py           # supabase storage wrappers
@@ -24,10 +29,34 @@ src/
       __init__.py
       voice_note_repo.py   # CRUD with Supabase client
     models/                # Pydantic request/response models + domain DTOs
+      agent.py             # AgentState, ReflectionContext, AgentResult, MultiAgentResult
       telegram_models.py
       domain.py
     utils/                 # small helpers (http client, backoff)
     tests/                 # unit and integration tests (see testing.md)
+
+Supervisor + sub-graphs pattern
+-------------------------------
+
+The `MultiAgentService` uses a flat LangGraph `StateGraph` with a
+deterministic `supervisor_node` (no LLM call) that routes on
+`state.mode`:
+
+- `agent` → `chat_node` (wraps `ChatAgentService.get_response()`)
+- `reflect` → `reflect_node` (Python if/else dispatch over
+  `state.pending_reflection`)
+
+The `reflect_node` dispatches to:
+- `_start_reflection` — picks a note via `NoteSelectorService`, calls
+  `question_agent.run(note)`, persists via `ReflectionRepository`
+- `_classify_and_route` — small LLM call for intent classification
+  (HINT | CONTEXT | ANSWER), then routes to `_hint`, `_context`, or `_answer`
+- `_answer` — scores the answer via `scorer_agent.run(...)`, persists,
+  then auto-loops by calling `_start_reflection` for the next note
+
+Sub-agents (`QuestionAgent`, `ScorerAgent`, `HintAgent`) are pure LLM
+callers with structured outputs. They share a single `ChatOpenAI`
+instance and never write to the database.
 
 Controller / Aggregator pattern
 -------------------------------

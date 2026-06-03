@@ -18,11 +18,30 @@ High-level components
   - Telegram Ingestion Service (validation, idempotency, raw persistence)
   - VoiceNote Service (business logic, metadata, DB persistence)
   - Storage Service (Supabase Storage or signed URL wrappers)
+  - MultiAgentService (unified supervisor with chat and reflection sub-graphs)
+  - Sub-agents (QuestionAgent, ScorerAgent, HintAgent) for Socratic reflection
   - Repository / DB layer (Supabase client or Postgres queries)
 - Persistence
   - Supabase Postgres for normalized metadata
   - Supabase Storage (or external blob store) for audio files
   - JSONL raw event sink (append-only), implemented as a simple file stub for MVP
+
+Multi-agent topology
+--------------------
+
+A single `MultiAgentService` owns a LangGraph `StateGraph` with a
+deterministic supervisor node that routes on `state.mode`:
+
+- `agent` mode → chat sub-graph (wraps `ChatAgentService.get_response()`)
+- `reflect` mode → reflection sub-graph (flat dispatch via Python if/else):
+  - No pending reflection → `start_node` (pick note → question_agent → persist)
+  - Pending reflection → intent classifier (LLM) → hint_agent | context_node | scorer_agent
+  - scorer_agent auto-loops: picks the next note and posts a new question
+- `note` mode never reaches `MultiAgentService` (audio is saved before routing)
+
+Sub-agents share a single `ChatOpenAI` instance. Reflect is a first-class
+mode (`note | agent | reflect`) entered via `/reflect` and exited by any
+slash command.
 
 Primary flows
 -------------
@@ -35,7 +54,7 @@ Primary flows
 6. Frontend/API: Minimal UI can fetch voice note metadata and playback URLs.
 
 Non-functional constraints
--------------------------
+--------------------------
 
 - Keep webhook handler fast — acknowledge with 200 quickly; defer heavy work to background tasks or short-lived threads.
 - Keep code small and modular: clear controller (router) vs service vs repository separation.

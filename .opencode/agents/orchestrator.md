@@ -1,7 +1,7 @@
 ---
 description: Orchestrates agents and manages the development workflow
 mode: primary
-model: opencode-go/minimax-m2.7
+model: opencode-go/minimax-m3
 temperature: 0.1
 tools:
   write: false
