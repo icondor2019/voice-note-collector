@@ -2,7 +2,7 @@
 name: general
 description: Easy tasks, codebase exploration, ad-hoc solutions that don't require planning
 mode: subagent
-model: opencode-go/minimax-m2.5
+model: opencode-go/minimax-m2.7
 temperature: 0.5
 tools:
   write: true

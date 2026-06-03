@@ -2,7 +2,7 @@
 name: backend
 description: Implements backend logic in FastAPI and Python
 mode: subagent
-model: opencode-go/minimax-m2.7
+model: opencode-go/deepseek-v4-pro
 temperature: 0.1
 tools:
   write: true

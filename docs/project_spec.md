@@ -29,7 +29,8 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 * Filtering notes by source
 * Simple label system for notes
 * Dual-mode Telegram bot: note mode (default) and agent mode (LLM-powered via LangGraph + gpt-4o-mini)
-* Reflection Agent: `/reflect` slash command that asks a question based on last 5 notes from active source, rates the user's response (1-10), and provides structured feedback
+* Multi-agent service: a single `MultiAgentService` with a supervisor and sub-graphs for chat and reflection. Reflect is a first-class mode with Socratic hints and auto-continuation.
+* Reflection Agent: `/reflect` slash command that starts a Socratic reflection loop on a non-internalized note from the active source, with `HintAgent` (bilingual Socratic hints), `ScorerAgent` (1-10 rating + structured feedback), and auto-continuation to the next note. Slash-cancels-reflect: any slash command in reflect mode cancels the pending reflection and exits to agent mode.
 * Reflection stats: `/reflect stats` subcommand showing internalization progress per active source
 
 ### Excluded (for now)
@@ -51,6 +52,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 - voice note details: Additional metadata about a voice note, such labels, title and processing status.
 - Chat memory: Per-user short-term conversation history stored in Supabase, scoped by telegram_user_id, used to provide context to the chat agent.
 - Reflection: A single-turn interaction where the bot asks a question based on a single note from the active source, the user responds (text or voice), and the bot rates the response (1-10). Notes are marked as "internalized" when meet a criteria
+- Multi-agent architecture: A single `MultiAgentService` LangGraph `StateGraph` with a deterministic `supervisor_node` that routes on `mode` to either a `chat_node` (wrapping `ChatAgentService`) or a `reflect_node` (Python if/else dispatch over `pending_reflection` to `start_reflection` / `cancel_reflection` / `_classify_and_route` → `_hint` / `_context` / `_answer` with auto-loop). Sub-agents (`QuestionAgent`, `ScorerAgent`, `HintAgent`) are pure LLM calls; the orchestrator is the only writer to the DB.
 
 ---
 
@@ -117,3 +119,37 @@ Main tables:
 | NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes |
 | ReflectionService | backend/services/reflection_service.py | Generates reflection questions via LLM, rates user responses (1-10), manages reflection state in Supabase, provides internalization stats via get_reflection_summary() |
 | NoteSelectorService | backend/services/note_selector_service.py | Selects a non-internalized note from a source's recent pool for reflection |
+| MultiAgentService | backend/services/multi_agent_service.py | Unified entry point. Owns a LangGraph `StateGraph` with `supervisor_node` → `chat_node` | `reflect_node`. `handle(user_message, telegram_user_id) -> MultiAgentResult` hydrates `pending_reflection`, invokes the graph, returns the reply + outcome. |
+| QuestionAgent | backend/services/agents/question_agent.py | Generates a reflection question for a single note. Wraps `QUESTION_GENERATION_PROMPT` (moved verbatim from `ReflectionService`). Returns `AgentResult(outcome="asked", reply=question_text, updates={question_type, question_text})`. |
+| ScorerAgent | backend/services/agents/scorer_agent.py | Rates a user's answer 1-10 and produces structured bullet-point feedback. Wraps `RATING_PROMPT` (moved verbatim from `ReflectionService`); rating clamped 1-10. Returns `AgentResult(outcome="scored", reply=feedback, updates={rating})`. |
+| HintAgent | backend/services/agents/hint_agent.py | Socratic, bilingual (English or Spanish — language of the note). New `HINT_PROMPT`. Never reveals the answer. Returns `AgentResult(outcome="hinted", reply=socratic_text)`. |
+
+---
+
+## 10. Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/note` | Switch to note mode (default) |
+| `/agent` | Switch to agent mode (LLM-powered chat) |
+| `/reflect` | Enter reflect mode and start a reflection on a non-internalized note from the active source. Posts the first question. |
+| `/reflect stats` | Show internalization progress for the active source |
+| `/current` | Show the current mode and pending state |
+| `/help` | List all available commands |
+| `/switch <name>` / `/default` / other source commands | Source management (unchanged) |
+
+**Slash-cancels-reflect rule**: any slash command sent while in `reflect` mode cancels the pending reflection and switches the mode back to `agent`. No dedicated `/reflect cancel` is needed.
+
+---
+
+## 11. Modes
+
+`ChatModeService` (process-global in-memory flag) accepts three values:
+
+| Mode | Default | Behavior |
+|------|---------|----------|
+| `note` | yes | Voice notes and non-slash text are saved as notes. |
+| `agent` | no | Voice notes and non-slash text are routed through `MultiAgentService.chat_node` → `ChatAgentService`. |
+| `reflect` | no | Voice notes and non-slash text are routed through `MultiAgentService.reflect_node` → Socratic reflection loop. Hints and reminders are in the language of the active note. Auto-continues to the next non-internalized note after each answer until exhausted. |
+
+`note` mode never reaches `MultiAgentService` — the message handler saves the note before calling the service.

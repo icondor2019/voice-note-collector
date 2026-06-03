@@ -15,8 +15,10 @@ from backend.repositories.sources_repository import SourcesRepository
 from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_note_details_repository import VoiceNoteDetailsRepository
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
+from backend.services.agents import HintAgent, QuestionAgent, ScorerAgent
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.chat_agent_service import ChatAgentService
+from backend.services.multi_agent_service import MultiAgentService
 from backend.services.note_selector_service import NoteSelectorService
 from backend.services.reflection_service import ReflectionService
 from backend.services.source_service import SourceService
@@ -106,12 +108,6 @@ async def get_chat_memory_repository(
     return ChatMemoryRepository(client=client)
 
 
-async def get_chat_agent_service(
-    memory_repository: ChatMemoryRepository = Depends(get_chat_memory_repository),
-) -> ChatAgentService:
-    return ChatAgentService(memory_repository=memory_repository)
-
-
 def get_reflection_repository(
     client: Any = Depends(get_supabase),
 ) -> ReflectionRepository:
@@ -128,22 +124,91 @@ def get_note_selector_service(
     )
 
 
+# ------------------------------------------------------------------ #
+#  Sub-agents (shared ChatOpenAI instance per plan §8)
+# ------------------------------------------------------------------ #
+
+def get_agent_model() -> ChatOpenAI:
+    """Shared LLM used by all sub-agents and the intent classifier."""
+    return ChatOpenAI(
+        model=settings.AGENT_LLM_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+    )
+
+
+def get_question_agent(
+    agent_model: ChatOpenAI = Depends(get_agent_model),
+) -> QuestionAgent:
+    return QuestionAgent(model=agent_model)
+
+
+def get_scorer_agent(
+    agent_model: ChatOpenAI = Depends(get_agent_model),
+) -> ScorerAgent:
+    return ScorerAgent(model=agent_model)
+
+
+def get_hint_agent(
+    agent_model: ChatOpenAI = Depends(get_agent_model),
+) -> HintAgent:
+    return HintAgent(model=agent_model)
+
+
+# ------------------------------------------------------------------ #
+#  Services
+# ------------------------------------------------------------------ #
+
 def get_reflection_service(
     reflection_repository: ReflectionRepository = Depends(get_reflection_repository),
     sources_repository: SourcesRepository = Depends(get_sources_repository),
     note_selector_service: NoteSelectorService = Depends(get_note_selector_service),
+    question_agent: QuestionAgent = Depends(get_question_agent),
+    scorer_agent: ScorerAgent = Depends(get_scorer_agent),
 ) -> ReflectionService:
-    model = ChatOpenAI(
-        model=settings.REFLECTION_LLM_MODEL,
-        api_key=settings.OPENAI_API_KEY,
-    )
     return ReflectionService(
         reflection_repository=reflection_repository,
         sources_repository=sources_repository,
-        model=model,
         note_selector_service=note_selector_service,
+        question_agent=question_agent,
+        scorer_agent=scorer_agent,
     )
 
+
+def get_chat_agent_service(
+    memory_repository: ChatMemoryRepository = Depends(get_chat_memory_repository),
+) -> ChatAgentService:
+    return ChatAgentService(memory_repository=memory_repository)
+
+
+def get_multi_agent_service(
+    chat_agent: ChatAgentService = Depends(get_chat_agent_service),
+    reflection_service: ReflectionService = Depends(get_reflection_service),
+    question_agent: QuestionAgent = Depends(get_question_agent),
+    scorer_agent: ScorerAgent = Depends(get_scorer_agent),
+    hint_agent: HintAgent = Depends(get_hint_agent),
+    chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
+    sources_repository: SourcesRepository = Depends(get_sources_repository),
+    note_selector_service: NoteSelectorService = Depends(get_note_selector_service),
+    memory_repository: ChatMemoryRepository = Depends(get_chat_memory_repository),
+    agent_model: ChatOpenAI = Depends(get_agent_model),
+) -> MultiAgentService:
+    return MultiAgentService(
+        chat_agent=chat_agent,
+        reflection_service=reflection_service,
+        question_agent=question_agent,
+        scorer_agent=scorer_agent,
+        hint_agent=hint_agent,
+        chat_mode_service=chat_mode_service,
+        sources_repository=sources_repository,
+        note_selector_service=note_selector_service,
+        memory_repository=memory_repository,
+        agent_model=agent_model,
+    )
+
+
+# ------------------------------------------------------------------ #
+#  Handlers
+# ------------------------------------------------------------------ #
 
 def get_command_handler(
     source_service: SourceService = Depends(get_source_service),
@@ -168,7 +233,7 @@ def get_message_handler(
     command_handler: TelegramCommandHandler = Depends(get_command_handler),
     bot_client: TelegramBotClient = Depends(get_telegram_bot_client),
     chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
-    chat_agent_service: ChatAgentService = Depends(get_chat_agent_service),
+    multi_agent_service: MultiAgentService = Depends(get_multi_agent_service),
     reflection_service: ReflectionService = Depends(get_reflection_service),
 ) -> TelegramMessageHandler:
     return TelegramMessageHandler(
@@ -178,10 +243,14 @@ def get_message_handler(
         command_handler=command_handler,
         bot_client=bot_client,
         chat_mode_service=chat_mode_service,
-        chat_agent_service=chat_agent_service,
+        multi_agent_service=multi_agent_service,
         reflection_service=reflection_service,
     )
 
+
+# ------------------------------------------------------------------ #
+#  Webhook endpoint
+# ------------------------------------------------------------------ #
 
 @router.post("/webhook", dependencies=[Depends(verify_telegram_secret)])
 async def telegram_webhook(

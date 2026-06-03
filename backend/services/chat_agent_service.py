@@ -1,8 +1,12 @@
-"""Chat agent service powered by a LangGraph StateGraph."""
+"""Chat agent service powered by a LangGraph StateGraph.
+
+Provides a reusable chat_node callable and a build_graph factory so the
+MultiAgentService can reuse the chat sub-graph logic.
+"""
 
 from __future__ import annotations
 
-from typing import Annotated, TypedDict
+from typing import Annotated, TYPE_CHECKING, TypedDict
 
 from loguru import logger
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -13,6 +17,9 @@ from langgraph.graph.message import add_messages
 from backend.repositories.chat_memory_repository import ChatMemoryRepository
 from configuration.settings import settings
 
+if TYPE_CHECKING:
+    from langgraph.graph.state import CompiledStateGraph
+
 SYSTEM_PROMPT = "You are a helpful assistant for a personal voice note app."
 AGENT_ERROR_RESPONSE = "❌ Agent error. Please try again."
 
@@ -22,6 +29,11 @@ class AgentState(TypedDict):
 
 
 class ChatAgentService:
+    """One-node LangGraph agent with per-user memory.
+
+    In v1 the MultiAgentService calls get_response() directly as a shim.
+    For future use, build_graph() returns a standalone compiled graph.
+    """
 
     def __init__(
         self,
@@ -29,22 +41,43 @@ class ChatAgentService:
         max_memory_messages: int = settings.AGENT_MAX_MEMORY_MESSAGES,
     ) -> None:
         self._model = ChatOpenAI(
-            model= settings.AGENT_LLM_MODEL,
+            model=settings.AGENT_LLM_MODEL,
             api_key=settings.OPENAI_API_KEY,
         )
         self._memory_repository = memory_repository
         self._max_memory_messages = max_memory_messages
+        self._graph = self.build_graph(self._model, memory_repository)
+
+    @staticmethod
+    def build_graph(
+        model: ChatOpenAI,
+        memory_repository: ChatMemoryRepository | None = None,
+        max_memory_messages: int = settings.AGENT_MAX_MEMORY_MESSAGES,
+    ) -> "CompiledStateGraph":
+        """Build and compile a standalone chat StateGraph.
+
+        The returned graph can be used as a sub-graph node inside a
+        larger supervisor graph (multi-agent service).
+        """
+        service = _ShimChatAgent(model, memory_repository, max_memory_messages)
+
         graph = StateGraph(AgentState)
-        graph.add_node("call_model", self._call_model)
+        graph.add_node("call_model", service._call_model)
         graph.add_edge(START, "call_model")
         graph.add_edge("call_model", END)
-        self._graph = graph.compile()
+        return graph.compile()
 
     def _call_model(self, state: AgentState) -> AgentState:
         response = self._model.invoke(state["messages"])
         return {"messages": [response]}
 
-    async def get_response(self, user_message: str, telegram_user_id: int | None = None) -> str:
+    async def get_response(
+        self, user_message: str, telegram_user_id: int | None = None
+    ) -> str:
+        """Backward-compatible shim.
+
+        MultiAgentService calls this directly in v1 for agent-mode routing.
+        """
         try:
             history_messages: list[BaseMessage] = []
             if telegram_user_id is not None and self._memory_repository is not None:
@@ -105,3 +138,21 @@ class ChatAgentService:
             return response_text
         except Exception:
             return AGENT_ERROR_RESPONSE
+
+
+class _ShimChatAgent:
+    """Internal helper used by ChatAgentService.build_graph()."""
+
+    def __init__(
+        self,
+        model: ChatOpenAI,
+        memory_repository: ChatMemoryRepository | None,
+        max_memory_messages: int,
+    ) -> None:
+        self._model = model
+        self._memory_repository = memory_repository
+        self._max_memory_messages = max_memory_messages
+
+    def _call_model(self, state: AgentState) -> AgentState:
+        response = self._model.invoke(state["messages"])
+        return {"messages": [response]}
