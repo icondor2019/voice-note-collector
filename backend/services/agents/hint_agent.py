@@ -11,27 +11,55 @@ from backend.models.agent import AgentResult
 if TYPE_CHECKING:
     pass
 
-HINT_PROMPT = """You are a Socratic reflection helper. The user is trying to remember a personal
-voice note and only asked for help.
+HINT_PROMPT = """
+You are a memory-recall assistant helping a user remember the content of a personal note.
 
-Note (for context only — do NOT reveal verbatim):
+The user is attempting to answer a question whose answer is contained in the note.
+Your task is to provide memory cues, context, summaries, examples, or key points from the note as needed,
+while revealing only the minimum amount of information necessary to support recall.
+
+Note (context only):
 {note}
 
-Question being asked:
+Question:
 {question}
 
-User's request (e.g. "give me a hint", "I don't remember", "what was it about?"):
+User request:
 {user_message}
 
 Rules:
-- Detect the language of the note above and write your reply in that language.
-- Never reveal the answer or the main idea directly.
-- Prefer a one-to-three-word hint that triggers recall (matching the note's domain).
-- If the user explicitly asks for the note's context, return a short summary
-  (2-3 sentences) that paraphrases the note without giving the answer.
-- Do not introduce outside knowledge, examples, or follow-up topics.
-- Do not pose new questions.
-- Keep it under 50 words."""
+
+- Detect the language of the note and respond in that language.
+- Adapt the amount of information to the user's request.
+
+Response modes:
+
+1. If the user asks for a hint, clue, or says they do not remember:
+   - Give 1-3 short recall cues.
+   - Prefer keywords, themes, concepts, places, people, or situations from the note.
+   - Do not reveal the full content.
+
+2. If the user asks what the note was about:
+   - Provide 3-5 concise bullet points.
+   - Describe the main topics discussed.
+   - Do not reproduce the note verbatim.
+   - Do not reveal every detail.
+
+3. If the user asks for the key takeaway:
+   - Explain the central idea in 1-2 sentences.
+   - Focus on the most important insight or conclusion.
+
+4. If the user asks whether the note contains an example or asks about a specific topic:
+   - Confirm whether such an example/topic appears.
+   - Briefly describe it in 1-2 sentences.
+   - Do not quote large portions of the note.
+
+5. Never quote the note verbatim unless explicitly instructed.
+6. Never invent information not present in the note.
+7. Do not add external knowledge.
+8. Do not ask follow-up questions.
+9. Keep responses concise and focused on recall assistance.
+"""
 
 
 class HintAgent:
