@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 
 from loguru import logger
@@ -32,6 +33,7 @@ CURRENT_ACTIVE = '📍 Active source: "{name}"\n🤖 Mode: {mode}'
 CURRENT_NONE = '⚠️ No active source. Use /default to reset.\n🤖 Mode: {mode}'
 SOURCES_HEADER = "📂 Your sources:\n"
 SOURCES_EMPTY = "📂 No sources found. Use /create <name> to get started."
+SOURCES_PAGE_SIZE = 6
 INVALID_NAME = "❌ Source name must be 2–4 words, no special characters."
 UNKNOWN_TEXT = "🤖 Send voice notes to capture ideas. Use /sources to manage sources."
 LABEL_SUCCESS = '✅ Label "{name}" created.'
@@ -97,7 +99,7 @@ class TelegramCommandHandler:
         elif command == "/current":
             reply = await self._handle_current()
         elif command == "/sources":
-            reply = await self._handle_sources()
+            return await self._handle_sources(chat_id)
         elif command == "/label":
             reply = await self._handle_label(argument)
         elif command == "/reflect":
@@ -163,16 +165,45 @@ class TelegramCommandHandler:
 
         return CURRENT_ACTIVE.format(name=active["source_name"], mode=mode)
 
-    async def _handle_sources(self) -> str:
+    async def _handle_sources(self, chat_id: int | str) -> str:
         sources = await self._source_service.list_sources()
         if not sources:
+            await self._bot_client.send_message(chat_id, SOURCES_EMPTY)
             return SOURCES_EMPTY
 
-        lines: list[str] = []
-        for source in sources:
-            marker = "●" if source.get("status") == "active" else "○"
-            lines.append(f"{marker} {source.get('source_name')}")
-        return SOURCES_HEADER + "\n".join(lines)
+        keyboard = self.build_sources_keyboard(sources, page=0)
+        await self._bot_client.send_message_with_inline_keyboard(
+            chat_id, SOURCES_HEADER, keyboard
+        )
+        return SOURCES_HEADER
+
+    def build_sources_keyboard(self, sources: list[dict], page: int = 0) -> dict:
+        total_pages = max(1, math.ceil(len(sources) / SOURCES_PAGE_SIZE))
+        page = max(0, min(page, total_pages - 1))
+        page_sources = sources[
+            page * SOURCES_PAGE_SIZE : (page + 1) * SOURCES_PAGE_SIZE
+        ]
+
+        buttons: list[list[dict]] = []
+        for source in page_sources:
+            source_name = source.get("source_name", "")
+            source_id = source.get("id", "")
+            is_active = source.get("status") == "active"
+            button_text = f"✅ {source_name}" if is_active else source_name
+            buttons.append(
+                [{"text": button_text, "callback_data": f"src:{source_id}"}]
+            )
+
+        if total_pages > 1:
+            nav_row: list[dict] = []
+            if page > 0:
+                nav_row.append({"text": "◀️", "callback_data": f"src_page:{page - 1}"})
+            if page < total_pages - 1:
+                nav_row.append({"text": "▶️", "callback_data": f"src_page:{page + 1}"})
+            if nav_row:
+                buttons.append(nav_row)
+
+        return {"inline_keyboard": buttons}
 
     async def _handle_label(self, argument: str) -> str:
         name = argument.strip().lower()

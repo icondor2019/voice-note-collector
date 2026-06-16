@@ -6,8 +6,13 @@ from backend.repositories.repository_errors import DuplicateRecordError
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.multi_agent_service import MultiAgentService
 from backend.services.reflection_service import ReflectionService
+from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
-from backend.services.telegram_command_handler import TelegramCommandHandler
+from backend.services.telegram_command_handler import (
+    SOURCES_HEADER,
+    SOURCES_PAGE_SIZE,
+    TelegramCommandHandler,
+)
 from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.transcription_service import TranscriptionService
 from backend.services.voice_note_service import VoiceNoteService
@@ -27,6 +32,7 @@ class TelegramMessageHandler:
         chat_mode_service: ChatModeService,
         multi_agent_service: MultiAgentService,
         reflection_service: ReflectionService,
+        source_service: SourceService,
     ) -> None:
         self._ingestion_service = ingestion_service
         self._voice_note_service = voice_note_service
@@ -36,6 +42,7 @@ class TelegramMessageHandler:
         self._chat_mode_service = chat_mode_service
         self._multi_agent_service = multi_agent_service
         self._reflection_service = reflection_service
+        self._source_service = source_service
 
     async def _notify(self, chat_id: int | None, text: str) -> None:
         if not settings.TELEGRAM_NOTIFY_ON_TRANSCRIPTION:
@@ -51,6 +58,11 @@ class TelegramMessageHandler:
             )
 
     async def handle(self, update: dict) -> dict:
+        # ── Callback queries (inline keyboard) ────────────────────────
+        logger.info("telegram.handler.received | keys={}", list(update.keys()))
+        if "callback_query" in update:
+            return await self._handle_callback_query(update["callback_query"])
+
         event = self._ingestion_service._build_ingestion_event(update)
         from_user_id = event.get("from_user_id")
         if from_user_id != settings.TELEGRAM_ALLOWED_USER_ID:
@@ -160,6 +172,95 @@ class TelegramMessageHandler:
 
         # ── Unsupported message types ────────────────────────────────
         return {"outcome": "ignored", "message_type": message_type}
+
+    # ------------------------------------------------------------------ #
+    #  Callback query handlers
+    # ------------------------------------------------------------------ #
+
+    async def _handle_callback_query(self, callback_query: dict) -> dict:
+        logger.info("telegram.callback_query.received | callback_data={} | from_user_id={}",
+                    callback_query.get("data"), callback_query.get("from", {}).get("id"))
+        from_user_id = callback_query.get("from", {}).get("id")
+        callback_query_id = callback_query.get("id", "")
+
+        # Auth check
+        if from_user_id != settings.TELEGRAM_ALLOWED_USER_ID:
+            await self._bot_client.answer_callback_query(
+                callback_query_id, text="Unauthorized", show_alert=True
+            )
+            return {"outcome": "ignored", "reason": "unauthorized_callback"}
+
+        callback_data = callback_query.get("data", "")
+        chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
+        message_id = callback_query.get("message", {}).get("message_id")
+
+        if callback_data.startswith("src:"):
+            source_id = callback_data[4:]
+            return await self._handle_source_switch_callback(
+                callback_query_id, source_id, chat_id, message_id
+            )
+        elif callback_data.startswith("src_page:"):
+            page_str = callback_data[9:]
+            try:
+                page = int(page_str)
+            except ValueError:
+                await self._bot_client.answer_callback_query(callback_query_id)
+                return {"outcome": "error", "reason": "invalid_page"}
+            return await self._handle_source_page_callback(
+                callback_query_id, page, chat_id, message_id
+            )
+        else:
+            await self._bot_client.answer_callback_query(callback_query_id)
+            return {"outcome": "ignored", "reason": "unknown_callback_data"}
+
+    async def _handle_source_switch_callback(
+        self,
+        callback_query_id: str,
+        source_id: str,
+        chat_id: int | str | None,
+        message_id: int | None,
+    ) -> dict:
+        activated = await self._source_service.activate_source_by_id(source_id)
+        if activated is None:
+            await self._bot_client.answer_callback_query(
+                callback_query_id,
+                text="⚠️ There is an error with the source. Please use /sources to refresh.",
+                show_alert=True,
+            )
+            return {"outcome": "error", "reason": "stale_source"}
+
+        sources = await self._source_service.list_sources()
+        target_page = 0
+        for i, s in enumerate(sources):
+            if s["id"] == source_id:
+                target_page = i // SOURCES_PAGE_SIZE
+                break
+
+        keyboard = self._command_handler.build_sources_keyboard(
+            sources, page=target_page
+        )
+        if chat_id is not None and message_id is not None:
+            await self._bot_client.edit_message_text(
+                chat_id, message_id, SOURCES_HEADER, keyboard
+            )
+        await self._bot_client.answer_callback_query(callback_query_id)
+        return {"outcome": "source_switched", "source_id": source_id}
+
+    async def _handle_source_page_callback(
+        self,
+        callback_query_id: str,
+        page: int,
+        chat_id: int | str | None,
+        message_id: int | None,
+    ) -> dict:
+        sources = await self._source_service.list_sources()
+        keyboard = self._command_handler.build_sources_keyboard(sources, page=page)
+        if chat_id is not None and message_id is not None:
+            await self._bot_client.edit_message_text(
+                chat_id, message_id, SOURCES_HEADER, keyboard
+            )
+        await self._bot_client.answer_callback_query(callback_query_id)
+        return {"outcome": "page_changed", "page": page}
 
     # ------------------------------------------------------------------ #
     #  Helpers

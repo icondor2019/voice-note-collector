@@ -199,8 +199,8 @@ async def test_sources_lists_all() -> None:
     source_service = AsyncMock()
     source_service.list_sources = AsyncMock(
         return_value=[
-            {"source_name": "alpha", "status": "active"},
-            {"source_name": "beta", "status": "deactivated"},
+            {"id": "1", "source_name": "alpha", "status": "active"},
+            {"id": "2", "source_name": "beta", "status": "deactivated"},
         ]
     )
     bot_client = AsyncMock()
@@ -209,13 +209,25 @@ async def test_sources_lists_all() -> None:
         source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
     )
 
-    reply = await handler.handle_text("/sources", chat_id=123)
+    await handler.handle_text("/sources", chat_id=123)
 
-    assert "📂" in reply
-    assert "alpha" in reply
-    assert "beta" in reply
-    assert "● alpha" in reply
-    assert "○ beta" in reply
+    # Inline keyboard was sent (not plain text)
+    bot_client.send_message_with_inline_keyboard.assert_awaited_once()
+    call_args = bot_client.send_message_with_inline_keyboard.call_args
+    chat_id_arg, text_arg, keyboard_arg = call_args[0]
+    assert chat_id_arg == 123
+    assert "📂" in text_arg
+    inline_kb = keyboard_arg["inline_keyboard"]
+    # Two source buttons (no pagination for 2 sources)
+    assert len(inline_kb) == 2
+    # Active source has ✅ prefix
+    assert inline_kb[0][0]["text"] == "✅ alpha"
+    assert inline_kb[0][0]["callback_data"] == "src:1"
+    # Inactive source has no prefix
+    assert inline_kb[1][0]["text"] == "beta"
+    assert inline_kb[1][0]["callback_data"] == "src:2"
+    # Plain text send_message was NOT called
+    bot_client.send_message.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -336,6 +348,7 @@ async def test_message_handler_routes_text_to_command_handler() -> None:
         chat_mode_service=ChatModeService(),
         multi_agent_service=AsyncMock(),
         reflection_service=reflection_service,
+        source_service=AsyncMock(),
     )
     update = {
         "message": {
@@ -381,6 +394,7 @@ async def test_message_handler_audio_path_unaffected() -> None:
         chat_mode_service=ChatModeService(),
         multi_agent_service=AsyncMock(),
         reflection_service=reflection_service,
+        source_service=AsyncMock(),
     )
 
     result = await handler.handle({"message": {}})

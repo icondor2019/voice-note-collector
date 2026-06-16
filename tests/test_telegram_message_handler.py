@@ -5,6 +5,7 @@ import pytest
 from backend.models.agent import MultiAgentResult
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.reflection_service import ReflectionService
+from backend.services.source_service import SourceService
 from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.telegram_message_handler import TelegramMessageHandler
 from backend.services.transcription_service import TranscriptionService
@@ -47,11 +48,13 @@ def _build_handler(
     chat_mode_service: ChatModeService | None = None,
     multi_agent_service: AsyncMock | None = None,
     reflection_service: ReflectionService | None = None,
+    source_service: AsyncMock | None = None,
 ) -> tuple[
     TelegramMessageHandler,
     Mock,
     AsyncMock,
     Mock,
+    AsyncMock,
     AsyncMock,
     AsyncMock,
     AsyncMock,
@@ -114,6 +117,7 @@ def _build_handler(
         chat_mode_service=chat_mode_service or ChatModeService(),
         multi_agent_service=agent_service,
         reflection_service=reflection_service,
+        source_service=source_service or AsyncMock(spec=SourceService),
     )
     return (
         handler,
@@ -124,6 +128,7 @@ def _build_handler(
         bot_client,
         agent_service,
         reflection_service,
+        source_service or AsyncMock(spec=SourceService),
     )
 
 
@@ -133,7 +138,7 @@ def _build_handler(
 async def test_success_notification_includes_preview() -> None:
     event = _build_event(chat_id=321)
     raw_text = "Short preview"
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(event, raw_text=raw_text)
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(event, raw_text=raw_text)
 
     result = await handler.handle({})
 
@@ -146,7 +151,7 @@ async def test_success_notification_includes_preview() -> None:
 async def test_success_notification_truncates_preview_to_100_chars() -> None:
     raw_text = "x" * 120
     event = _build_event()
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(event, raw_text=raw_text)
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(event, raw_text=raw_text)
 
     await handler.handle({})
 
@@ -165,7 +170,7 @@ async def test_success_notification_without_source_name() -> None:
         "voice_note_id": "note-999",
         "source_name": None,
     }
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(
         event, raw_text=raw_text, ingest_result=ingest_result
     )
 
@@ -178,7 +183,7 @@ async def test_success_notification_without_source_name() -> None:
 @pytest.mark.anyio
 async def test_transcription_error_sends_notification_and_raises() -> None:
     event = _build_event()
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(
         event, transcription_error=RuntimeError("boom")
     )
 
@@ -191,7 +196,7 @@ async def test_transcription_error_sends_notification_and_raises() -> None:
 @pytest.mark.anyio
 async def test_ingestion_error_sends_notification_and_raises() -> None:
     event = _build_event()
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(
         event, ingestion_error=RuntimeError("db down")
     )
 
@@ -207,7 +212,7 @@ async def test_notifications_disabled_skip_success_send(
 ) -> None:
     monkeypatch.setattr(settings, "TELEGRAM_NOTIFY_ON_TRANSCRIPTION", False)
     event = _build_event()
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(event)
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(event)
 
     await handler.handle({})
 
@@ -220,7 +225,7 @@ async def test_notifications_disabled_skip_error_send(
 ) -> None:
     monkeypatch.setattr(settings, "TELEGRAM_NOTIFY_ON_TRANSCRIPTION", False)
     event = _build_event()
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(
         event, transcription_error=RuntimeError("boom")
     )
 
@@ -233,7 +238,7 @@ async def test_notifications_disabled_skip_error_send(
 @pytest.mark.anyio
 async def test_no_chat_id_skips_notification() -> None:
     event = _build_event(chat_id=None)
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(event)
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(event)
 
     result = await handler.handle({})
 
@@ -244,7 +249,7 @@ async def test_no_chat_id_skips_notification() -> None:
 @pytest.mark.anyio
 async def test_notification_failure_is_swallowed() -> None:
     event = _build_event()
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(
         event, bot_client_error=RuntimeError("telegram down")
     )
 
@@ -258,7 +263,7 @@ async def test_notification_failure_is_swallowed() -> None:
 async def test_duplicate_update_skips_storage() -> None:
     """Existing note → skip ingest but transcription may still be called."""
     event = _build_event()
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(
         event, existing_voice_note={"id": "existing"}
     )
 
@@ -273,7 +278,7 @@ async def test_duplicate_update_skips_storage() -> None:
 @pytest.mark.anyio
 async def test_text_non_command_note_mode_ignored() -> None:
     event = _build_event(message_type="text")
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(event)
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(event)
     update = {"message": {"text": "hello", "chat": {"id": 123}}}
 
     result = await handler.handle(update)
@@ -289,7 +294,7 @@ async def test_text_non_command_agent_mode_replies() -> None:
     event = _build_event(message_type="text")
     chat_mode_service = ChatModeService()
     chat_mode_service.set_mode("agent")
-    handler, _, _, _, _, bot_client, agent_svc, _ = _build_handler(
+    handler, _, _, _, _, bot_client, agent_svc, _, _ = _build_handler(
         event, chat_mode_service=chat_mode_service
     )
     update = {"message": {"text": "hello", "chat": {"id": 123}}}
@@ -309,7 +314,7 @@ async def test_text_command_in_agent_mode_routes_command_handler() -> None:
     event = _build_event(message_type="text")
     chat_mode_service = ChatModeService()
     chat_mode_service.set_mode("agent")
-    handler, _, _, _, _, _, _, _ = _build_handler(
+    handler, _, _, _, _, _, _, _, _ = _build_handler(
         event, chat_mode_service=chat_mode_service
     )
     update = {"message": {"text": "/sources", "chat": {"id": 123}}}
@@ -327,7 +332,7 @@ async def test_audio_agent_mode_transcribes_and_skips_storage() -> None:
     event = _build_event(message_type="voice")
     chat_mode_service = ChatModeService()
     chat_mode_service.set_mode("agent")
-    handler, _, _, trans_svc, _, bot_client, agent_svc, _ = _build_handler(
+    handler, _, _, trans_svc, _, bot_client, agent_svc, _, _ = _build_handler(
         event, chat_mode_service=chat_mode_service
     )
 
@@ -353,7 +358,7 @@ async def test_text_agent_mode_llm_error_sends_error_message() -> None:
             reply="❌ Agent error. Please try again.", outcome="agent_response"
         )
     )
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(
         event, chat_mode_service=chat_mode_service, multi_agent_service=agent_svc
     )
     update = {"message": {"text": "hello", "chat": {"id": 123}}}
@@ -377,7 +382,7 @@ async def test_audio_agent_mode_llm_error_sends_error_message() -> None:
             reply="❌ Agent error. Please try again.", outcome="agent_response"
         )
     )
-    handler, _, _, _, _, bot_client, _, _ = _build_handler(
+    handler, _, _, _, _, bot_client, _, _, _ = _build_handler(
         event, chat_mode_service=chat_mode_service, multi_agent_service=agent_svc
     )
 
@@ -394,7 +399,7 @@ async def test_text_agent_mode_passes_message_text_to_agent() -> None:
     event = _build_event(message_type="text")
     chat_mode_service = ChatModeService()
     chat_mode_service.set_mode("agent")
-    handler, _, _, _, _, _, agent_svc, _ = _build_handler(
+    handler, _, _, _, _, _, agent_svc, _, _ = _build_handler(
         event, chat_mode_service=chat_mode_service
     )
     update = {"message": {"text": "hello there", "chat": {"id": 123}}}
@@ -412,7 +417,7 @@ async def test_audio_agent_mode_passes_transcription_to_agent() -> None:
     event = _build_event(message_type="voice")
     chat_mode_service = ChatModeService()
     chat_mode_service.set_mode("agent")
-    handler, _, _, _, _, _, agent_svc, _ = _build_handler(
+    handler, _, _, _, _, _, agent_svc, _, _ = _build_handler(
         event, chat_mode_service=chat_mode_service, raw_text="transcribed"
     )
 
