@@ -235,6 +235,7 @@ def get_message_handler(
     chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
     multi_agent_service: MultiAgentService = Depends(get_multi_agent_service),
     reflection_service: ReflectionService = Depends(get_reflection_service),
+    source_service: SourceService = Depends(get_source_service),
 ) -> TelegramMessageHandler:
     return TelegramMessageHandler(
         ingestion_service=ingestion_service,
@@ -245,6 +246,7 @@ def get_message_handler(
         chat_mode_service=chat_mode_service,
         multi_agent_service=multi_agent_service,
         reflection_service=reflection_service,
+        source_service=source_service,
     )
 
 
@@ -273,6 +275,7 @@ async def telegram_webhook(
 
     # Accept update payloads even if message type is unsupported.
     try:
+        logger.info("telegram.webhook.received | update_keys={}", list(payload.keys()))
         result = await handler.handle(payload)
     except RepositoryError as exc:
         logger.exception("telegram.webhook.repository_error | {}", exc)

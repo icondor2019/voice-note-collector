@@ -123,6 +123,7 @@ Main tables:
 | QuestionAgent | backend/services/agents/question_agent.py | Generates a reflection question for a single note. Wraps `QUESTION_GENERATION_PROMPT` (moved verbatim from `ReflectionService`). Returns `AgentResult(outcome="asked", reply=question_text, updates={question_type, question_text})`. |
 | ScorerAgent | backend/services/agents/scorer_agent.py | Rates a user's answer 1-10 and produces structured bullet-point feedback. Wraps `RATING_PROMPT` (moved verbatim from `ReflectionService`); rating clamped 1-10. Returns `AgentResult(outcome="scored", reply=feedback, updates={rating})`. |
 | HintAgent | backend/services/agents/hint_agent.py | Socratic, bilingual (English or Spanish — language of the note). New `HINT_PROMPT`. Never reveals the answer. Returns `AgentResult(outcome="hinted", reply=socratic_text)`. |
+| TelegramBotClient | backend/services/telegram_bot_client.py | Thin httpx wrapper for the Telegram Bot API. Methods: send_message, send_message_with_inline_keyboard (for reply_markup keyboards), edit_message_text (handles "message is not modified" gracefully), answer_callback_query (dismisses inline button loading indicator). |
 
 ---
 
@@ -136,6 +137,7 @@ Main tables:
 | `/reflect stats` | Show internalization progress for the active source |
 | `/current` | Show the current mode and pending state |
 | `/help` | List all available commands |
+| `/sources` | **Displays an interactive inline keyboard** (one button per source, ✅ marks the active source, pagination at 6 per page with ◀️/▶️ navigation). Tapping a source activates it and edits the message in place. `/switch <name>` is unchanged. |
 | `/switch <name>` / `/default` / other source commands | Source management (unchanged) |
 
 **Slash-cancels-reflect rule**: any slash command sent while in `reflect` mode cancels the pending reflection and switches the mode back to `agent`. No dedicated `/reflect cancel` is needed.
