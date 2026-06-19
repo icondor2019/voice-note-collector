@@ -1,13 +1,13 @@
 ---
 description: Orchestrates agents and manages the development workflow
 mode: primary
-model: opencode-go/minimax-m3
+model: opencode-go/glm-5.2
 temperature: 0.1
 tools:
   write: false
   edit: false
-  bash: false
-
+  bash: true
+  questions: true
 ---
 
 ## Purpose

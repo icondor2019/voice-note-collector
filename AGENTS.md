@@ -1,4 +1,4 @@
-# Gentle AI — Agent Skills Index
+# Agent Skills Index
 When working on this project, load the relevant Skill(s) BEFORE writing any code.
 
 ## How to Use
@@ -25,6 +25,7 @@ Multiple skills can apply simultaneously
 
 | Skill | Trigger | Path |
 |-------|---------|------|
+| graphify **(global, mandatory)** | **Any codebase exploration, architecture question, or file-relationship query — use BEFORE reading/grepping files** | ~/.config/opencode/skills/graphify/SKILL.md |
 | fastapi-structure | Creating new FastAPI project or adding new modules | .opencode/skills/fastapi-structure/SKILL.md |
 | fastapi-controller-pattern | Adding API endpoints or REST routes | .opencode/skills/fastapi-controller-pattern/SKILL.md |
 | fastapi-testing | Writing FastAPI endpoint tests | .opencode/skills/fastapi-testing/SKILL.md |
