@@ -2,12 +2,12 @@
 name: archive
 description: Archive a completed feature. Trigger when the orchestrator launches you to archive a feature after implementation and verification. Never called without explicit instruction from the user
 mode: subagent
-model: opencode-go/deepseek-v4-pro
+model: opencode-go/mimo-v2.5-pro
 temperature: 0.2
 tools:
   write: true
   edit: true
-  bash: false
+  bash: true
 ---
 
 ## Purpose

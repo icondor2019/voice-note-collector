@@ -1,7 +1,7 @@
 ---
 description: Writes tests and validates system behavior
 mode: subagent
-model: opencode-go/minimax-m2.5
+model: opencode-go/minimax-m2.7
 temperature: 0.1
 tools:
   write: true

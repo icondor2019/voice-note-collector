@@ -25,7 +25,7 @@ Multiple skills can apply simultaneously
 
 | Skill | Trigger | Path |
 |-------|---------|------|
-| graphify **(global, mandatory)** | **Any codebase exploration, architecture question, or file-relationship query — use BEFORE reading/grepping files** | ~/.config/opencode/skills/graphify/SKILL.md |
+| graphify **(global, mandatory)** | **Any codebase exploration, architecture question, or file-relationship query — use BEFORE reading/grepping files. `graphify-out/` is gitignored but exists locally — always check for `graphify-out/graph.json` and run `graphify query` first (absent on fresh clones until `/graphify` runs).** | ~/.config/opencode/skills/graphify/SKILL.md |
 | fastapi-structure | Creating new FastAPI project or adding new modules | .opencode/skills/fastapi-structure/SKILL.md |
 | fastapi-controller-pattern | Adding API endpoints or REST routes | .opencode/skills/fastapi-controller-pattern/SKILL.md |
 | fastapi-testing | Writing FastAPI endpoint tests | .opencode/skills/fastapi-testing/SKILL.md |
