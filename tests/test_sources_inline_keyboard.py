@@ -207,6 +207,9 @@ async def test_callback_query_src_activates_source() -> None:
 
     source_service.activate_source_by_id.assert_awaited_once_with("id-0")
     handler._bot_client.edit_message_text.assert_awaited_once()
+    handler._bot_client.send_message.assert_awaited_once_with(
+        123, '✅ Active source is now "source-0".'
+    )
     handler._bot_client.answer_callback_query.assert_awaited_once()
     assert result == {"outcome": "source_switched", "source_id": "id-0"}
 
@@ -267,6 +270,9 @@ async def test_callback_query_src_already_active_handles_gracefully() -> None:
 
     # Edit may be called (might be no-op on Telegram side, but we still call it)
     handler._bot_client.edit_message_text.assert_awaited_once()
+    handler._bot_client.send_message.assert_awaited_once_with(
+        123, '✅ Active source is now "source-0".'
+    )
     handler._bot_client.answer_callback_query.assert_awaited_once()
     assert result == {"outcome": "source_switched", "source_id": "id-0"}
 
@@ -310,6 +316,96 @@ async def test_callback_query_invalid_page_number_handled() -> None:
 
     handler._bot_client.answer_callback_query.assert_awaited_once()
     assert result == {"outcome": "error", "reason": "invalid_page"}
+
+
+@pytest.mark.anyio
+async def test_callback_query_src_sends_confirmation_message() -> None:
+    source_service = AsyncMock(spec=SourceService)
+    source_service.activate_source_by_id = AsyncMock(
+        return_value={"id": "id-0", "source_name": "source-0", "status": "active"}
+    )
+    source_service.list_sources = AsyncMock(return_value=_make_sources(2, active_index=0))
+    cmd_handler = _make_command_handler(source_service=source_service)
+    handler = _make_message_handler(command_handler=cmd_handler, source_service=source_service)
+    update = _build_callback_update("src:id-0")
+
+    await handler.handle(update)
+
+    # send_message was called with the correct chat_id and confirmation text
+    handler._bot_client.send_message.assert_awaited_once_with(
+        123, '✅ Active source is now "source-0".'
+    )
+    # Verify call order: edit_message_text → send_message → answer_callback_query
+    calls = handler._bot_client.method_calls
+    call_names = [c[0] for c in calls]
+    edit_idx = call_names.index("edit_message_text")
+    send_idx = call_names.index("send_message")
+    answer_idx = call_names.index("answer_callback_query")
+    assert edit_idx < send_idx < answer_idx, (
+        f"Expected edit_message_text < send_message < answer_callback_query, "
+        f"got order: {call_names}"
+    )
+
+
+@pytest.mark.anyio
+async def test_callback_query_src_already_active_sends_confirmation() -> None:
+    source_service = AsyncMock(spec=SourceService)
+    source_service.activate_source_by_id = AsyncMock(
+        return_value={"id": "id-0", "source_name": "source-0", "status": "active"}
+    )
+    source_service.list_sources = AsyncMock(return_value=_make_sources(2, active_index=0))
+    cmd_handler = _make_command_handler(source_service=source_service)
+    handler = _make_message_handler(command_handler=cmd_handler, source_service=source_service)
+    update = _build_callback_update("src:id-0")
+
+    await handler.handle(update)
+
+    # Re-tap still sends the confirmation
+    handler._bot_client.send_message.assert_awaited_once_with(
+        123, '✅ Active source is now "source-0".'
+    )
+    handler._bot_client.answer_callback_query.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_callback_query_src_stale_source_no_confirmation() -> None:
+    source_service = AsyncMock(spec=SourceService)
+    source_service.activate_source_by_id = AsyncMock(return_value=None)  # stale
+    handler = _make_message_handler(source_service=source_service)
+    update = _build_callback_update("src:does-not-exist")
+
+    await handler.handle(update)
+
+    handler._bot_client.send_message.assert_not_awaited()
+    handler._bot_client.answer_callback_query.assert_awaited_once()
+    call = handler._bot_client.answer_callback_query.call_args
+    assert call.kwargs.get("show_alert") is True
+    assert "use /sources to refresh" in (call.kwargs.get("text") or "")
+
+
+@pytest.mark.anyio
+async def test_callback_query_src_no_chat_id_skips_confirmation() -> None:
+    source_service = AsyncMock(spec=SourceService)
+    source_service.activate_source_by_id = AsyncMock(
+        return_value={"id": "id-0", "source_name": "source-0", "status": "active"}
+    )
+    source_service.list_sources = AsyncMock(return_value=_make_sources(2, active_index=0))
+    cmd_handler = _make_command_handler(source_service=source_service)
+    handler = _make_message_handler(command_handler=cmd_handler, source_service=source_service)
+    # Build update manually so chat_id in the message is None
+    update = {
+        "callback_query": {
+            "id": "cq-1",
+            "from": {"id": settings.TELEGRAM_ALLOWED_USER_ID},
+            "data": "src:id-0",
+            "message": {"chat": {"id": None}, "message_id": 456},
+        }
+    }
+
+    await handler.handle(update)
+
+    handler._bot_client.send_message.assert_not_awaited()
+    handler._bot_client.answer_callback_query.assert_awaited_once()
 
 
 # ── 5.5 Integration-style tests ────────────────────────────────────────────────

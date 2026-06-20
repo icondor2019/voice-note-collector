@@ -11,6 +11,7 @@ from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import (
     SOURCES_HEADER,
     SOURCES_PAGE_SIZE,
+    SWITCH_SUCCESS,
     TelegramCommandHandler,
 )
 from backend.services.telegram_ingestion_service import TelegramIngestionService
@@ -243,6 +244,10 @@ class TelegramMessageHandler:
             await self._bot_client.edit_message_text(
                 chat_id, message_id, SOURCES_HEADER, keyboard
             )
+        source_name = activated.get("source_name", "")
+        confirmation_text = SWITCH_SUCCESS.format(slug=source_name)
+        if chat_id is not None:
+            await self._bot_client.send_message(chat_id, confirmation_text)
         await self._bot_client.answer_callback_query(callback_query_id)
         return {"outcome": "source_switched", "source_id": source_id}
 

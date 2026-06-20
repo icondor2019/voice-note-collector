@@ -7,7 +7,7 @@ temperature: 0.2
 tools:
   write: true
   edit: true
-  bash: false
+  bash: true
 ---
 
 ## Purpose
