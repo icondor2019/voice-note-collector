@@ -50,10 +50,31 @@ CREATE TABLE IF NOT EXISTS voice_note_details (
     voice_note_uuid UUID PRIMARY KEY REFERENCES voice_notes(id) ON DELETE CASCADE,
     title TEXT,
     status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'enriched', 'reviewed')),
-    label_ids INTEGER[] NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+"""
+
+# Voice note labels join table creation query
+CREATE_VOICE_NOTE_LABELS_TABLE_QUERY = """
+CREATE TABLE IF NOT EXISTS voice_note_labels (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    voice_note_uuid UUID NOT NULL REFERENCES voice_notes(id) ON DELETE CASCADE,
+    label_id INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    applied_by TEXT NOT NULL DEFAULT 'llm' CHECK (applied_by IN ('llm', 'user')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS voice_note_labels_active_idx
+ON voice_note_labels (voice_note_uuid, label_id)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS voice_note_labels_label_idx
+ON voice_note_labels (label_id)
+WHERE deleted_at IS NULL;
+
+ALTER TABLE voice_note_labels ENABLE ROW LEVEL SECURITY;
 """
 
 # Chat memory table creation query

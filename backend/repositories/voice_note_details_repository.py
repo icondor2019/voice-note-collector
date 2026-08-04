@@ -16,7 +16,6 @@ class VoiceNoteDetailsRepository:
         payload = {
             "voice_note_uuid": voice_note_uuid,
             "status": NoteStatus.CREATED.value,
-            "label_ids": [],
         }
         response = await self._client.table(self._table).insert(payload).execute()
         self._raise_on_error(response)
@@ -62,9 +61,13 @@ class VoiceNoteDetailsRepository:
     async def get_pending_notes_with_source(
         self, source_id_filter: Optional[str] = None
     ) -> list[dict[str, Any]]:
+        # !inner makes the source filter apply to the parent rows. Without it PostgREST
+        # returns every pending note with voice_notes nulled out on non-matches, which the
+        # caller then has to discard one warning at a time. Safe unconditionally:
+        # voice_note_uuid is a NOT NULL FK, so the join can never drop a row.
         query = (
             self._client.table(self._table)
-            .select("*, voice_notes(source_id, raw_text)")
+            .select("*, voice_notes!inner(source_id, raw_text)")
             .eq("status", NoteStatus.CREATED.value)
         )
         if source_id_filter:
@@ -81,47 +84,13 @@ class VoiceNoteDetailsRepository:
         return flattened
 
     async def update_enrichment(
-        self, voice_note_uuid: str, title: str, label_ids: list[int]
+        self, voice_note_uuid: str, title: str
     ) -> Optional[dict[str, Any]]:
         payload = {
             "title": title,
-            "label_ids": label_ids,
             "status": NoteStatus.ENRICHED.value,
             "updated_at": datetime.utcnow().isoformat(),
         }
-        response = (
-            await self._client.table(self._table)
-            .update(payload)
-            .eq("voice_note_uuid", voice_note_uuid)
-            .execute()
-        )
-        self._raise_on_error(response, allow_none_response=True)
-        return self._single(response)
-
-    async def add_label_id(self, voice_note_uuid: str, label_id: int) -> Optional[dict[str, Any]]:
-        details = await self.get_details(voice_note_uuid)
-        if not details:
-            return None
-        label_ids = list(details.get("label_ids") or [])
-        if label_id not in label_ids:
-            label_ids.append(label_id)
-        return await self._update_label_ids(voice_note_uuid, label_ids)
-
-    async def remove_label_id(self, voice_note_uuid: str, label_id: int) -> Optional[dict[str, Any]]:
-        details = await self.get_details(voice_note_uuid)
-        if not details:
-            return None
-        label_ids = list(details.get("label_ids") or [])
-        if label_id in label_ids:
-            label_ids.remove(label_id)
-        return await self._update_label_ids(voice_note_uuid, label_ids)
-
-    async def _update_label_ids(
-        self,
-        voice_note_uuid: str,
-        label_ids: list[int],
-    ) -> Optional[dict[str, Any]]:
-        payload = {"label_ids": label_ids, "updated_at": datetime.utcnow().isoformat()}
         response = (
             await self._client.table(self._table)
             .update(payload)

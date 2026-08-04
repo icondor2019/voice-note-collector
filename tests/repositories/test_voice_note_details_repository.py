@@ -42,6 +42,7 @@ class _StubTable:
         self.insert_payload: Optional[dict[str, Any]] = None
         self.update_payload: Optional[dict[str, Any]] = None
         self.updated_voice_note_uuid: Optional[str] = None
+        self.selected: Optional[str] = None
 
     def insert(self, payload: dict[str, Any]) -> _StubQuery:
         self.insert_payload = payload
@@ -52,6 +53,7 @@ class _StubTable:
         return _StubQuery(self._response)
 
     def select(self, *args: Any, **kwargs: Any) -> _StubQuery:
+        self.selected = args[0] if args else None
         return _StubQuery(self._response)
 
 
@@ -67,17 +69,6 @@ class _StubClient:
         return self.table_instance
 
 
-class _SequencedClient:
-    def __init__(self, responses: list[_StubResponse]) -> None:
-        self._responses = responses
-        self.calls: int = 0
-
-    def table(self, table_name: str) -> _StubTable:
-        response = self._responses[self.calls]
-        self.calls += 1
-        return _StubTable(response)
-
-
 class TestVoiceNoteDetailsRepository:
     @pytest.mark.anyio
     async def test_create_details_inserts_defaults(self) -> None:
@@ -86,7 +77,6 @@ class TestVoiceNoteDetailsRepository:
             data={
                 "voice_note_uuid": "note-1",
                 "status": NoteStatus.CREATED.value,
-                "label_ids": [],
                 "created_at": created_at,
             }
         )
@@ -101,7 +91,6 @@ class TestVoiceNoteDetailsRepository:
         assert client.table_instance.insert_payload == {
             "voice_note_uuid": "note-1",
             "status": NoteStatus.CREATED.value,
-            "label_ids": [],
         }
 
     @pytest.mark.anyio
@@ -161,27 +150,53 @@ class TestVoiceNoteDetailsRepository:
         assert "updated_at" in client.table_instance.update_payload
 
     @pytest.mark.anyio
-    async def test_add_label_id_appends(self) -> None:
-        responses = [
-            _StubResponse(data={"voice_note_uuid": "note-1", "label_ids": [1]}),
-            _StubResponse(data={"voice_note_uuid": "note-1", "label_ids": [1, 2]}),
-        ]
-        client = _SequencedClient(responses)
+    async def test_get_pending_notes_uses_inner_join_on_voice_notes(self) -> None:
+        """Without !inner PostgREST returns every pending note with voice_notes nulled
+        out, so the source filter silently degrades into caller-side discarding."""
+        client = _StubClient(_StubResponse(data=[]))
         repository = VoiceNoteDetailsRepository(client)
 
-        result = await repository.add_label_id("note-1", 2)
+        await repository.get_pending_notes_with_source("source-1")
 
-        assert result == responses[1].data
+        assert client.table_instance is not None
+        assert client.table_instance.selected == "*, voice_notes!inner(source_id, raw_text)"
 
     @pytest.mark.anyio
-    async def test_remove_label_id_removes(self) -> None:
-        responses = [
-            _StubResponse(data={"voice_note_uuid": "note-1", "label_ids": [1, 2]}),
-            _StubResponse(data={"voice_note_uuid": "note-1", "label_ids": [1]}),
+    async def test_get_pending_notes_flattens_nested_voice_note(self) -> None:
+        response = _StubResponse(
+            data=[
+                {
+                    "voice_note_uuid": "note-1",
+                    "status": NoteStatus.CREATED.value,
+                    "voice_notes": {"source_id": "source-1", "raw_text": "hello"},
+                }
+            ]
+        )
+        repository = VoiceNoteDetailsRepository(_StubClient(response))
+
+        result = await repository.get_pending_notes_with_source("source-1")
+
+        assert result == [
+            {
+                "voice_note_uuid": "note-1",
+                "status": NoteStatus.CREATED.value,
+                "source_id": "source-1",
+                "raw_text": "hello",
+            }
         ]
-        client = _SequencedClient(responses)
+
+    @pytest.mark.anyio
+    async def test_update_enrichment_sets_title_and_status(self) -> None:
+        response = _StubResponse(data={"voice_note_uuid": "note-1", "title": "Hello"})
+        client = _StubClient(response)
         repository = VoiceNoteDetailsRepository(client)
 
-        result = await repository.remove_label_id("note-1", 2)
+        result = await repository.update_enrichment("note-1", "Hello")
 
-        assert result == responses[1].data
+        assert result == response.data
+        assert client.table_instance is not None
+        payload = client.table_instance.update_payload
+        assert payload is not None
+        assert payload["title"] == "Hello"
+        assert payload["status"] == NoteStatus.ENRICHED.value
+        assert "label_ids" not in payload

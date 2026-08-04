@@ -8,15 +8,15 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
-class NoteStatus(str, Enum):
-    CREATED = "created"
-    ENRICHED = "enriched"
-    REVIEWED = "reviewed"
+class LabelOrigin(str, Enum):
+    LLM = "llm"
+    USER = "user"
 
 
-class VoiceNoteDetails(BaseModel):
+class VoiceNoteLabel(BaseModel):
+    id: UUID
     voice_note_uuid: UUID
-    title: Optional[str]
-    status: NoteStatus
+    label_id: int
+    applied_by: LabelOrigin
     created_at: datetime
-    updated_at: datetime
+    deleted_at: Optional[datetime] = None

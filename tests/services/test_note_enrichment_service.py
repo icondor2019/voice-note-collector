@@ -33,9 +33,12 @@ class TestNoteEnrichmentService:
         details_repo = AsyncMock()
         details_repo.get_pending_notes_with_source.return_value = []
         labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
         openai_client = _StubOpenAI("[]")
         settings = SimpleNamespace(ENVIRONMENT="dev")
-        service = NoteEnrichmentService(details_repo, None, labels_repo, openai_client, settings)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
 
         await service.run_process()
 
@@ -48,9 +51,12 @@ class TestNoteEnrichmentService:
         details_repo = AsyncMock()
         details_repo.get_pending_notes_with_source.return_value = []
         labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
         openai_client = _StubOpenAI("[]")
         settings = SimpleNamespace(ENVIRONMENT="prod")
-        service = NoteEnrichmentService(details_repo, None, labels_repo, openai_client, settings)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
 
         await service.run_process()
 
@@ -65,10 +71,13 @@ class TestNoteEnrichmentService:
         ]
         details_repo.get_pending_notes_with_source.return_value = notes
         labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
         labels_repo.list_labels.return_value = []
         openai_client = _StubOpenAI("[]")
         settings = SimpleNamespace(ENVIRONMENT="dev")
-        service = NoteEnrichmentService(details_repo, None, labels_repo, openai_client, settings)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
         service._enrich_batch = AsyncMock(return_value=[])
 
         await service.run_process()
@@ -85,10 +94,13 @@ class TestNoteEnrichmentService:
             {"voice_note_uuid": "note-2", "source_id": "source-1", "raw_text": "hey"},
         ]
         labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
         labels_repo.list_labels.return_value = []
         openai_client = _StubOpenAI("[]")
         settings = SimpleNamespace(ENVIRONMENT="dev")
-        service = NoteEnrichmentService(details_repo, None, labels_repo, openai_client, settings)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
         service._enrich_batch = AsyncMock(
             return_value=[
                 {"voice_note_uuid": "note-1", "title": "Title 1", "label_ids": [1]},
@@ -99,8 +111,12 @@ class TestNoteEnrichmentService:
         await service.run_process()
 
         assert details_repo.update_enrichment.await_count == 2
-        details_repo.update_enrichment.assert_any_await("note-1", "Title 1", [1])
-        details_repo.update_enrichment.assert_any_await("note-2", "Title 2", [2])
+        details_repo.update_enrichment.assert_any_await("note-1", "Title 1")
+        details_repo.update_enrichment.assert_any_await("note-2", "Title 2")
+
+        assert note_labels_repo.replace_llm_labels.await_count == 2
+        note_labels_repo.replace_llm_labels.assert_any_await("note-1", [1])
+        note_labels_repo.replace_llm_labels.assert_any_await("note-2", [2])
 
     @pytest.mark.anyio
     async def test_invalid_label_ids_filtered_before_update(self) -> None:
@@ -109,6 +125,7 @@ class TestNoteEnrichmentService:
             {"voice_note_uuid": "note-1", "source_id": "source-1", "raw_text": "hi"}
         ]
         labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
         labels_repo.list_labels.return_value = [
             {"id": 1, "label": "Work"},
             {"id": 2, "label": "Personal"},
@@ -125,11 +142,14 @@ class TestNoteEnrichmentService:
             )
         )
         settings = SimpleNamespace(ENVIRONMENT="dev")
-        service = NoteEnrichmentService(details_repo, None, labels_repo, openai_client, settings)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
 
         await service.run_process()
 
-        details_repo.update_enrichment.assert_awaited_once_with("note-1", "Hello", [1])
+        details_repo.update_enrichment.assert_awaited_once_with("note-1", "Hello")
+        note_labels_repo.replace_llm_labels.assert_awaited_once_with("note-1", [1])
 
     @pytest.mark.anyio
     async def test_label_ids_truncated_before_update(self) -> None:
@@ -138,6 +158,7 @@ class TestNoteEnrichmentService:
             {"voice_note_uuid": "note-1", "source_id": "source-1", "raw_text": "hi"}
         ]
         labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
         labels_repo.list_labels.return_value = [
             {"id": 1, "label": "A"},
             {"id": 2, "label": "B"},
@@ -158,12 +179,15 @@ class TestNoteEnrichmentService:
             )
         )
         settings = SimpleNamespace(ENVIRONMENT="dev")
-        service = NoteEnrichmentService(details_repo, None, labels_repo, openai_client, settings)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
 
         await service.run_process()
 
-        details_repo.update_enrichment.assert_awaited_once_with(
-            "note-1", "Hello", [1, 2, 3, 4, 5]
+        details_repo.update_enrichment.assert_awaited_once_with("note-1", "Hello")
+        note_labels_repo.replace_llm_labels.assert_awaited_once_with(
+            "note-1", [1, 2, 3, 4, 5]
         )
 
     @pytest.mark.anyio
@@ -171,10 +195,13 @@ class TestNoteEnrichmentService:
         details_repo = AsyncMock()
         details_repo.get_pending_notes_with_source.return_value = []
         labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
         openai_client = _StubOpenAI("[]")
         openai_client.chat.completions.create = AsyncMock()
         settings = SimpleNamespace(ENVIRONMENT="dev")
-        service = NoteEnrichmentService(details_repo, None, labels_repo, openai_client, settings)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
 
         await service.run_process()
 
@@ -187,11 +214,15 @@ class TestNoteEnrichmentService:
             {"voice_note_uuid": "note-1", "source_id": "source-1", "raw_text": "hi"}
         ]
         labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
         labels_repo.list_labels.return_value = []
         openai_client = _StubOpenAI("not-json")
         settings = SimpleNamespace(ENVIRONMENT="dev")
-        service = NoteEnrichmentService(details_repo, None, labels_repo, openai_client, settings)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
 
         await service.run_process()
 
         details_repo.update_enrichment.assert_not_called()
+        note_labels_repo.replace_llm_labels.assert_not_called()
