@@ -42,6 +42,7 @@ class _StubTable:
         self.insert_payload: Optional[dict[str, Any]] = None
         self.update_payload: Optional[dict[str, Any]] = None
         self.updated_voice_note_uuid: Optional[str] = None
+        self.selected: Optional[str] = None
 
     def insert(self, payload: dict[str, Any]) -> _StubQuery:
         self.insert_payload = payload
@@ -52,6 +53,7 @@ class _StubTable:
         return _StubQuery(self._response)
 
     def select(self, *args: Any, **kwargs: Any) -> _StubQuery:
+        self.selected = args[0] if args else None
         return _StubQuery(self._response)
 
 
@@ -146,6 +148,18 @@ class TestVoiceNoteDetailsRepository:
         assert client.table_instance.update_payload is not None
         assert client.table_instance.update_payload["title"] == "Hello"
         assert "updated_at" in client.table_instance.update_payload
+
+    @pytest.mark.anyio
+    async def test_get_pending_notes_uses_inner_join_on_voice_notes(self) -> None:
+        """Without !inner PostgREST returns every pending note with voice_notes nulled
+        out, so the source filter silently degrades into caller-side discarding."""
+        client = _StubClient(_StubResponse(data=[]))
+        repository = VoiceNoteDetailsRepository(client)
+
+        await repository.get_pending_notes_with_source("source-1")
+
+        assert client.table_instance is not None
+        assert client.table_instance.selected == "*, voice_notes!inner(source_id, raw_text)"
 
     @pytest.mark.anyio
     async def test_get_pending_notes_flattens_nested_voice_note(self) -> None:

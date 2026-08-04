@@ -61,9 +61,13 @@ class VoiceNoteDetailsRepository:
     async def get_pending_notes_with_source(
         self, source_id_filter: Optional[str] = None
     ) -> list[dict[str, Any]]:
+        # !inner makes the source filter apply to the parent rows. Without it PostgREST
+        # returns every pending note with voice_notes nulled out on non-matches, which the
+        # caller then has to discard one warning at a time. Safe unconditionally:
+        # voice_note_uuid is a NOT NULL FK, so the join can never drop a row.
         query = (
             self._client.table(self._table)
-            .select("*, voice_notes(source_id, raw_text)")
+            .select("*, voice_notes!inner(source_id, raw_text)")
             .eq("status", NoteStatus.CREATED.value)
         )
         if source_id_filter:
