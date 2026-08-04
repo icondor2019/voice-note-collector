@@ -48,8 +48,8 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 
 - Voice note: An audio message sent by the user, along with its transcription and metadata.
 - Source: A category or project that voice notes can be associated with. One source can be active at a time.
-- Label: A tag that can be applied to voice notes for organization and retrieval.
-- voice note details: Additional metadata about a voice note, such labels, title and processing status.
+- Label: A tag that can be applied to voice notes for organization and retrieval. The note-to-label relation lives in the `voice_note_labels` join table, which soft-deletes removals and tracks whether each label came from the enrichment LLM or the user.
+- voice note details: Additional metadata about a voice note, such as title and processing status.
 - Chat memory: Per-user short-term conversation history stored in Supabase, scoped by telegram_user_id, used to provide context to the chat agent.
 - Reflection: A single-turn interaction where the bot asks a question based on a single note from the active source, the user responds (text or voice), and the bot rates the response (1-10). Notes are marked as "internalized" when meet a criteria
 - Multi-agent architecture: A single `MultiAgentService` LangGraph `StateGraph` with a deterministic `supervisor_node` that routes on `mode` to either a `chat_node` (wrapping `ChatAgentService`) or a `reflect_node` (Python if/else dispatch over `pending_reflection` to `start_reflection` / `cancel_reflection` / `_classify_and_route` → `_hint` / `_context` / `_answer` with auto-loop). Sub-agents (`QuestionAgent`, `ScorerAgent`, `HintAgent`) are pure LLM calls; the orchestrator is the only writer to the DB.
@@ -58,12 +58,13 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 
 ## 4. Data Model
 
-Table schemas are defined in backend/schema_queries.py
+Table schemas are defined in backend/repositories/schema_queries.py
 Main tables:
 - voice_notes
 - sources
 - labels
 - voice_note_details
+- voice_note_labels (join table between voice notes and labels; soft-deleted via deleted_at, and records whether the label was applied by the LLM or the user)
 - voice_note_chat_memory (stores per-user short-term conversation history for the chat agent)
 - reflections (stores reflection sessions with rating, feedback, status: pending/completed/cancelled)
 

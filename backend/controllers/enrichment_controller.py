@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from backend.repositories.labels_repository import LabelsRepository
 from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_note_details_repository import VoiceNoteDetailsRepository
+from backend.repositories.voice_note_labels_repository import VoiceNoteLabelsRepository
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.note_enrichment_service import NoteEnrichmentService
 from backend.utils.security import verify_api_key
@@ -44,18 +45,28 @@ def get_labels_repository(
     return LabelsRepository(client=client)
 
 
+def get_voice_note_labels_repository(
+    client: Any = Depends(get_supabase),
+) -> VoiceNoteLabelsRepository:
+    return VoiceNoteLabelsRepository(client=client)
+
+
 def get_enrichment_service(
     details_repository: VoiceNoteDetailsRepository = Depends(
         get_voice_note_details_repository
     ),
     voice_notes_repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
     labels_repository: LabelsRepository = Depends(get_labels_repository),
+    note_labels_repository: VoiceNoteLabelsRepository = Depends(
+        get_voice_note_labels_repository
+    ),
 ) -> NoteEnrichmentService:
     openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
     return NoteEnrichmentService(
         details_repo=details_repository,
         voice_notes_repo=voice_notes_repository,
         labels_repo=labels_repository,
+        note_labels_repo=note_labels_repository,
         openai_client=openai_client,
         settings=settings,
     )

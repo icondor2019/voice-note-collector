@@ -14,12 +14,14 @@ class NoteEnrichmentService:
         details_repo: Any,
         voice_notes_repo: Any,
         labels_repo: Any,
+        note_labels_repo: Any,
         openai_client: Any,
         settings: Any,
     ) -> None:
         self._details_repo = details_repo
         self._voice_notes_repo = voice_notes_repo
         self._labels_repo = labels_repo
+        self._note_labels_repo = note_labels_repo
         self._openai_client = openai_client
         self._settings = settings
 
@@ -63,6 +65,9 @@ class NoteEnrichmentService:
                 await self._details_repo.update_enrichment(
                     result["voice_note_uuid"],
                     result["title"],
+                )
+                await self._note_labels_repo.replace_llm_labels(
+                    result["voice_note_uuid"],
                     result["label_ids"],
                 )
 
