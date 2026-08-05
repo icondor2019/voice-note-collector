@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 
-from backend.services import note_enrichment_prompt
+from backend.repositories.repository_errors import RepositoryError
+from backend.services import label_utils, note_enrichment_prompt
 
 
 class NoteEnrichmentService:
@@ -42,6 +43,9 @@ class NoteEnrichmentService:
             extra={"count": len(pending_notes), "label_count": len(labels)},
         )
 
+        labels_by_dedup_key = {label_utils.dedup_key(label["label"]): label for label in labels}
+        remaining_budget = self._settings.MAX_LLM_LABEL_CREATIONS_PER_RUN
+
         grouped: dict[str, list[dict[str, Any]]] = {}
         for note in pending_notes:
             source_id = note.get("source_id")
@@ -62,14 +66,61 @@ class NoteEnrichmentService:
                 extra={"source_id": source_id, "result_count": len(results)},
             )
             for result in results:
+                label_ids = list(result["label_ids"])
+                for raw_name in result.get("new_labels", []):
+                    resolved_id, remaining_budget = await self._resolve_new_label(
+                        raw_name, labels, labels_by_dedup_key, remaining_budget
+                    )
+                    if resolved_id is not None and resolved_id not in label_ids:
+                        label_ids.append(resolved_id)
+
                 await self._details_repo.update_enrichment(
                     result["voice_note_uuid"],
                     result["title"],
                 )
                 await self._note_labels_repo.replace_llm_labels(
                     result["voice_note_uuid"],
-                    result["label_ids"],
+                    label_ids,
                 )
+
+    async def _resolve_new_label(
+        self,
+        raw_name: str,
+        labels: list[dict[str, Any]],
+        labels_by_dedup_key: dict[str, dict[str, Any]],
+        remaining_budget: int,
+    ) -> tuple[Optional[int], int]:
+        name = label_utils.validate_label_name(raw_name)
+        if not name:
+            logger.warning("note_enrichment.invalid_new_label", extra={"name": raw_name})
+            return None, remaining_budget
+
+        key = label_utils.dedup_key(name)
+        existing = labels_by_dedup_key.get(key)
+        if existing:
+            return existing["id"], remaining_budget
+
+        if remaining_budget <= 0:
+            logger.warning("note_enrichment.label_cap_reached", extra={"name": name})
+            return None, remaining_budget
+
+        try:
+            created = await self._labels_repo.create_label(name, created_by="llm")
+        except RepositoryError as exc:
+            if "unique" not in str(exc).lower():
+                raise
+            created = await self._labels_repo.get_label_by_name(name)
+            if not created:
+                logger.warning("note_enrichment.new_label_race_unresolved", extra={"name": name})
+                return None, remaining_budget
+
+        labels_by_dedup_key[key] = created
+        labels.append(created)
+        logger.info(
+            "note_enrichment.new_label_created",
+            extra={"name": name, "label_id": created["id"]},
+        )
+        return created["id"], remaining_budget - 1
 
     async def _enrich_batch(self, notes: list[dict], labels: list[dict]) -> list[dict]:
         prompt = note_enrichment_prompt.render_prompt(labels, notes)
@@ -128,11 +179,22 @@ class NoteEnrichmentService:
                     extra={"item": item, "filtered": filtered},
                 )
             filtered = filtered[:5]
+
+            raw_new_labels = item.get("new_labels") or []
+            new_labels: list[str] = []
+            if isinstance(raw_new_labels, list):
+                new_labels = [
+                    raw_name
+                    for raw_name in raw_new_labels
+                    if isinstance(raw_name, str) and raw_name.strip()
+                ][:2]
+
             enriched.append(
                 {
                     "voice_note_uuid": item["voice_note_uuid"],
                     "title": item["title"],
                     "label_ids": filtered,
+                    "new_labels": new_labels,
                 }
             )
 

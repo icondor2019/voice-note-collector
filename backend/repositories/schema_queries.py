@@ -39,7 +39,9 @@ CREATE_LABELS_TABLE_QUERY = """
 CREATE TABLE IF NOT EXISTS labels (
     id SERIAL PRIMARY KEY,
     label TEXT NOT NULL UNIQUE,
+    created_by TEXT NOT NULL DEFAULT 'user' CHECK (created_by IN ('llm', 'user')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ,
     CHECK (label = LOWER(label) AND LENGTH(label) <= 64)
 );
 """

@@ -10,8 +10,8 @@ class LabelsRepository:
         self._table = "labels"
         self._client = client
 
-    async def create_label(self, label: str) -> dict[str, Any]:
-        payload = {"label": label}
+    async def create_label(self, label: str, created_by: str = "user") -> dict[str, Any]:
+        payload = {"label": label, "created_by": created_by}
         response = await self._client.table(self._table).insert(payload).execute()
         self._raise_on_error(response)
         record = self._single(response)
@@ -36,14 +36,18 @@ class LabelsRepository:
             await self._client.table(self._table)
             .select("*")
             .eq("label", label)
+            .is_("deleted_at", "null")
             .maybe_single()
             .execute()
         )
         self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
-    async def list_labels(self) -> list[dict[str, Any]]:
-        response = await self._client.table(self._table).select("*").order("label", desc=False).execute()
+    async def list_labels(self, include_deleted: bool = False) -> list[dict[str, Any]]:
+        query = self._client.table(self._table).select("*")
+        if not include_deleted:
+            query = query.is_("deleted_at", "null")
+        response = await query.order("label", desc=False).execute()
         self._raise_on_error(response)
         return self._list(response)
 

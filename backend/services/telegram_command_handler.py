@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import math
-import re
 
 from loguru import logger
 
 from backend.repositories.labels_repository import LabelsRepository
 from backend.repositories.repository_errors import RepositoryError
+from backend.services.label_utils import validate_label_name
 from backend.services.chat_mode_service import (
     AGENT_MODE_ACTIVATED,
     NOTE_MODE_ACTIVATED,
@@ -206,12 +206,8 @@ class TelegramCommandHandler:
         return {"inline_keyboard": buttons}
 
     async def _handle_label(self, argument: str) -> str:
-        name = argument.strip().lower()
+        name = validate_label_name(argument)
         if not name:
-            return LABEL_INVALID
-        if len(name) > 64:
-            return LABEL_INVALID
-        if not re.match(r"^[a-z0-9 _-]+$", name):
             return LABEL_INVALID
 
         existing = await self._labels_repository.get_label_by_name(name)

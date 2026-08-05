@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     REFLECTION_MIN_AVG_SCORE: int = 8
     REFLECTION_MIN_REVIEWS: int = 2
 
+    # Label creation (safety ceiling, not a target — the LLM decides per note)
+    MAX_LLM_LABEL_CREATIONS_PER_RUN: int = 10
+
     @field_validator("CORS_ORIGINS", "CORS_ALLOW_METHODS", "CORS_ALLOW_HEADERS", mode="before")
     @classmethod
     def _split_csv_to_list(cls, v: Any) -> Any:

@@ -6,8 +6,10 @@ ENRICHMENT_PROMPT = """You are a note enrichment assistant. You will receive a l
 
 Your task:
 - For each note, generate a short title (1 sentence max)
-- For each note, select relevant label IDs from the available labels only — maximum 5 labels per note
-- You MUST NOT create new labels or use label IDs not in the provided list
+- For each note, select relevant label IDs from the available labels only — maximum 5 labels per note. You MUST NOT use label IDs not in the provided list.
+- Optionally, propose new labels when the existing labels genuinely don't cover what the note is about. Most notes need zero new labels — only propose one when there's a real gap, not just because a note is slightly different from existing labels.
+  Example: a note is a recipe for a vegan chocolate cake. Available labels are "cake" and "chocolate", but nothing captures that it's vegan. Since "vegan"/"veganism" is a real, reusable topic missing from the list, you may propose it as a new label.
+  New label names must be: lowercase, only letters/numbers/spaces/underscores/hyphens, at most 64 characters, short and general enough to apply to future notes (not a one-off description of this single note).
 
 Available labels:
 {{AVAILABLE_LABELS}}
@@ -20,9 +22,12 @@ Respond with a JSON array, one object per note:
   {
     "voice_note_uuid": "<uuid>",
     "title": "<one sentence title>",
-    "label_ids": [<id1>, <id2>]
+    "label_ids": [<id1>, <id2>],
+    "new_labels": ["<optional new label name>"]
   }
 ]
+
+"new_labels" should usually be an empty array [].
 """
 
 
