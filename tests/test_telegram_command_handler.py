@@ -101,6 +101,55 @@ async def test_create_invalid_name() -> None:
 
 
 @pytest.mark.anyio
+async def test_label_success() -> None:
+    source_service = AsyncMock()
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    labels_repository.get_label_by_name.return_value = None
+    handler = TelegramCommandHandler(
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
+    )
+
+    reply = await handler.handle_text("/label Vegan Recipes", chat_id=123)
+
+    assert "✅" in reply
+    assert "vegan recipes" in reply
+    labels_repository.create_label.assert_awaited_once_with("vegan recipes")
+
+
+@pytest.mark.anyio
+async def test_label_already_exists() -> None:
+    source_service = AsyncMock()
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    labels_repository.get_label_by_name.return_value = {"id": 1, "label": "cake"}
+    handler = TelegramCommandHandler(
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
+    )
+
+    reply = await handler.handle_text("/label cake", chat_id=123)
+
+    assert "❌" in reply
+    labels_repository.create_label.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_label_invalid_name() -> None:
+    source_service = AsyncMock()
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    handler = TelegramCommandHandler(
+        source_service, bot_client, labels_repository, ChatModeService(), AsyncMock()
+    )
+
+    reply = await handler.handle_text("/label not! valid$$", chat_id=123)
+
+    assert "❌" in reply
+    labels_repository.get_label_by_name.assert_not_awaited()
+    labels_repository.create_label.assert_not_awaited()
+
+
+@pytest.mark.anyio
 async def test_switch_success() -> None:
     source_service = AsyncMock()
     source_service._repository.get_source_by_name = AsyncMock(return_value={"id": "1"})
