@@ -387,3 +387,130 @@ class TestNoteEnrichmentService:
         labels_repo.create_label.assert_awaited_once_with("vegan", created_by="llm")
         note_labels_repo.replace_llm_labels.assert_any_await("note-1", [9])
         note_labels_repo.replace_llm_labels.assert_any_await("note-2", [9])
+
+
+class TestEnrichSpecificNotes:
+    @pytest.mark.anyio
+    async def test_enrich_specific_notes_processes_all_notes_in_batches(self) -> None:
+        details_repo = AsyncMock()
+        details_repo.get_pending_notes_with_source.return_value = [
+            {
+                "voice_note_uuid": f"note-{index}",
+                "source_id": "source-1",
+                "raw_text": f"text-{index}",
+            }
+            for index in range(6)
+        ]
+        labels_repo = AsyncMock()
+        labels_repo.list_labels.return_value = []
+        note_labels_repo = AsyncMock()
+        service = NoteEnrichmentService(
+            details_repo,
+            None,
+            labels_repo,
+            note_labels_repo,
+            _StubOpenAI("[]"),
+            SimpleNamespace(ENVIRONMENT="dev", MAX_LLM_LABEL_CREATIONS_PER_RUN=20),
+        )
+        service._enrich_batch = AsyncMock(return_value=[])
+
+        await service.enrich_specific_notes([f"note-{index}" for index in range(6)])
+
+        assert service._enrich_batch.await_count == 2
+        assert [len(call.args[0]) for call in service._enrich_batch.await_args_list] == [5, 1]
+
+    @pytest.mark.anyio
+    async def test_enrich_specific_notes_enriches_only_given_ids(self) -> None:
+        details_repo = AsyncMock()
+        details_repo.get_pending_notes_with_source.return_value = [
+            {"voice_note_uuid": "note-1", "source_id": "source-1", "raw_text": "hi"},
+            {"voice_note_uuid": "note-2", "source_id": "source-1", "raw_text": "hey"},
+            {"voice_note_uuid": "note-3", "source_id": "source-1", "raw_text": "hello"},
+        ]
+        labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
+        labels_repo.list_labels.return_value = []
+        openai_client = _StubOpenAI("[]")
+        settings = SimpleNamespace(ENVIRONMENT="dev", MAX_LLM_LABEL_CREATIONS_PER_RUN=20)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
+        service._enrich_batch = AsyncMock(
+            return_value=[
+                {"voice_note_uuid": "note-1", "title": "Title 1", "label_ids": []},
+            ]
+        )
+
+        await service.enrich_specific_notes(["note-1"])
+
+        # Only note-1 should be in the batch
+        batch_notes = service._enrich_batch.call_args.args[0]
+        assert len(batch_notes) == 1
+        assert batch_notes[0]["voice_note_uuid"] == "note-1"
+
+    @pytest.mark.anyio
+    async def test_enrich_specific_notes_honors_label_cap(self) -> None:
+        details_repo = AsyncMock()
+        details_repo.get_pending_notes_with_source.return_value = [
+            {"voice_note_uuid": "note-1", "source_id": "source-1", "raw_text": "vegan cake"},
+        ]
+        labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
+        labels_repo.list_labels.return_value = [{"id": 1, "label": "cake"}]
+        openai_client = _StubOpenAI(
+            json.dumps(
+                [
+                    {
+                        "voice_note_uuid": "note-1",
+                        "title": "Vegan cake recipe",
+                        "label_ids": [1],
+                        "new_labels": ["vegan"],
+                    }
+                ]
+            )
+        )
+        settings = SimpleNamespace(ENVIRONMENT="dev", MAX_LLM_LABEL_CREATIONS_PER_RUN=0)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
+
+        await service.enrich_specific_notes(["note-1"])
+
+        # Label cap is 0, so no new labels should be created
+        labels_repo.create_label.assert_not_called()
+        note_labels_repo.replace_llm_labels.assert_awaited_once_with("note-1", [1])
+
+    @pytest.mark.anyio
+    async def test_enrich_specific_notes_no_matching_notes(self) -> None:
+        details_repo = AsyncMock()
+        details_repo.get_pending_notes_with_source.return_value = [
+            {"voice_note_uuid": "note-1", "source_id": "source-1", "raw_text": "hi"},
+        ]
+        labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
+        openai_client = _StubOpenAI("[]")
+        settings = SimpleNamespace(ENVIRONMENT="dev", MAX_LLM_LABEL_CREATIONS_PER_RUN=20)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
+
+        await service.enrich_specific_notes(["nonexistent-note"])
+
+        # No LLM call should be made
+        labels_repo.list_labels.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_enrich_specific_notes_empty_ids(self) -> None:
+        details_repo = AsyncMock()
+        labels_repo = AsyncMock()
+        note_labels_repo = AsyncMock()
+        openai_client = _StubOpenAI("[]")
+        settings = SimpleNamespace(ENVIRONMENT="dev", MAX_LLM_LABEL_CREATIONS_PER_RUN=20)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
+
+        await service.enrich_specific_notes([])
+
+        # No DB calls
+        details_repo.get_pending_notes_with_source.assert_not_called()

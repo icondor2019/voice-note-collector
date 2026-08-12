@@ -569,3 +569,156 @@ async def test_help_message_includes_reflect_stats() -> None:
     """Assert HELP_MESSAGE includes /reflect stats entry."""
     assert "/reflect stats" in HELP_MESSAGE
     assert "show internalization progress" in HELP_MESSAGE
+
+
+@pytest.mark.anyio
+async def test_help_message_includes_build_doc() -> None:
+    """Assert HELP_MESSAGE includes /build_doc entry."""
+    assert "/build_doc" in HELP_MESSAGE
+    assert "synthesize" in HELP_MESSAGE.lower() or "session document" in HELP_MESSAGE.lower()
+
+
+@pytest.mark.anyio
+async def test_build_doc_creates_document() -> None:
+    """Send /build_doc; assert build called, reply contains title + content preview."""
+    from backend.services.session_builder_service import SessionBuilderService
+
+    source_service = AsyncMock()
+    source_service.get_active_source = AsyncMock(
+        return_value={"id": "source-1", "source_name": "my-source"}
+    )
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    session_builder = AsyncMock(spec=SessionBuilderService)
+    session_builder._session_docs_repo = AsyncMock()
+    session_builder._session_docs_repo.get_pending_note_ids = AsyncMock(
+        return_value=["note-1", "note-2"]
+    )
+    session_builder.build = AsyncMock(
+        return_value={
+            "id": "doc-1",
+            "title": "Test Document",
+            "content": "# Test Document\n\n## Summary\nA test summary that is long enough to be meaningful.\n\n## Key Ideas\n- idea 1",
+        }
+    )
+
+    handler = TelegramCommandHandler(
+        source_service,
+        bot_client,
+        labels_repository,
+        ChatModeService(),
+        AsyncMock(),
+        session_builder_service=session_builder,
+    )
+
+    reply = await handler.handle_text("/build_doc", chat_id=123)
+
+    session_builder.build.assert_awaited_once_with("source-1", ["note-1", "note-2"])
+    assert "Test Document" in reply
+    assert "2 notes synthesized" in reply
+
+
+@pytest.mark.anyio
+async def test_build_doc_stats_returns_preview() -> None:
+    """Send /build_doc stats; assert preview returned, no build call."""
+    from backend.services.session_builder_service import SessionBuilderService
+
+    source_service = AsyncMock()
+    source_service.get_active_source = AsyncMock(
+        return_value={"id": "source-1", "source_name": "my-source"}
+    )
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    session_builder = AsyncMock(spec=SessionBuilderService)
+    session_builder._session_docs_repo = AsyncMock()
+    session_builder._session_docs_repo.get_pending_note_ids = AsyncMock(
+        return_value=["note-1"]
+    )
+    session_builder.preview = AsyncMock(
+        return_value={
+            "pending_count": 1,
+            "un_enriched_count": 1,
+            "time_range": "2026-01-01 → 2026-01-02",
+            "notes": [
+                {
+                    "voice_note_uuid": "note-1",
+                    "title": "Note Title",
+                    "status": "created",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        }
+    )
+
+    handler = TelegramCommandHandler(
+        source_service,
+        bot_client,
+        labels_repository,
+        ChatModeService(),
+        AsyncMock(),
+        session_builder_service=session_builder,
+    )
+
+    reply = await handler.handle_text("/build_doc stats", chat_id=123)
+
+    session_builder.preview.assert_awaited_once()
+    session_builder.build.assert_not_awaited()
+    assert "my-source" in reply
+    assert "Pending notes: 1" in reply
+
+
+@pytest.mark.anyio
+async def test_build_doc_no_pending_notes() -> None:
+    """Mock zero pending; assert error reply."""
+    from backend.services.session_builder_service import SessionBuilderService
+
+    source_service = AsyncMock()
+    source_service.get_active_source = AsyncMock(
+        return_value={"id": "source-1", "source_name": "my-source"}
+    )
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    session_builder = AsyncMock(spec=SessionBuilderService)
+    session_builder._session_docs_repo = AsyncMock()
+    session_builder._session_docs_repo.get_pending_note_ids = AsyncMock(return_value=[])
+
+    handler = TelegramCommandHandler(
+        source_service,
+        bot_client,
+        labels_repository,
+        ChatModeService(),
+        AsyncMock(),
+        session_builder_service=session_builder,
+    )
+
+    reply = await handler.handle_text("/build_doc", chat_id=123)
+
+    assert "⚠️" in reply
+    assert "No pending notes" in reply
+    session_builder.build.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_build_doc_no_active_source() -> None:
+    """Mock no active source; assert error reply."""
+    from backend.services.session_builder_service import SessionBuilderService
+
+    source_service = AsyncMock()
+    source_service.get_active_source = AsyncMock(return_value=None)
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    session_builder = AsyncMock(spec=SessionBuilderService)
+
+    handler = TelegramCommandHandler(
+        source_service,
+        bot_client,
+        labels_repository,
+        ChatModeService(),
+        AsyncMock(),
+        session_builder_service=session_builder,
+    )
+
+    reply = await handler.handle_text("/build_doc", chat_id=123)
+
+    assert "⚠️" in reply
+    assert "No active source" in reply

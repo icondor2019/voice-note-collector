@@ -52,6 +52,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 - voice note details: Additional metadata about a voice note, such as title and processing status.
 - Chat memory: Per-user short-term conversation history stored in Supabase, scoped by telegram_user_id, used to provide context to the chat agent.
 - Reflection: A single-turn interaction where the bot asks a question based on a single note from the active source, the user responds (text or voice), and the bot rates the response (1-10). Notes are marked as "internalized" when meet a criteria
+- Session Document: A synthesized work product that groups multiple voice notes from one reading/learning period into a coherent document with title, summary, key ideas, open questions, and gaps.
 - Multi-agent architecture: A single `MultiAgentService` LangGraph `StateGraph` with a deterministic `supervisor_node` that routes on `mode` to either a `chat_node` (wrapping `ChatAgentService`) or a `reflect_node` (Python if/else dispatch over `pending_reflection` to `start_reflection` / `cancel_reflection` / `_classify_and_route` → `_hint` / `_context` / `_answer` with auto-loop). Sub-agents (`QuestionAgent`, `ScorerAgent`, `HintAgent`) are pure LLM calls; the orchestrator is the only writer to the DB.
 
 ---
@@ -63,10 +64,12 @@ Main tables:
 - voice_notes
 - sources
 - labels
-- voice_note_details
+- voice_note_details (includes document_uuid FK to session_documents)
 - voice_note_labels (join table between voice notes and labels; soft-deleted via deleted_at, and records whether the label was applied by the LLM or the user)
 - voice_note_chat_memory (stores per-user short-term conversation history for the chat agent)
-- reflections (stores reflection sessions with rating, feedback, status: pending/completed/cancelled)
+- reflections (stores reflection sessions with rating, feedback, status: pending/completed/cancelled; includes target_type and document_id for Phase 2 document reflection)
+- session_documents (synthesized work products grouping multiple voice notes; status: ready/reviewed)
+- session_document_components (append-only evolving artifacts for session documents: socratic_question, knowledge_gap, connection, reflection, mind_change)
 
 ---
 
@@ -125,6 +128,7 @@ Main tables:
 | ScorerAgent | backend/services/agents/scorer_agent.py | Rates a user's answer 1-10 and produces structured bullet-point feedback. Wraps `RATING_PROMPT` (moved verbatim from `ReflectionService`); rating clamped 1-10. Returns `AgentResult(outcome="scored", reply=feedback, updates={rating})`. |
 | HintAgent | backend/services/agents/hint_agent.py | Socratic, bilingual (English or Spanish — language of the note). New `HINT_PROMPT`. Never reveals the answer. Returns `AgentResult(outcome="hinted", reply=socratic_text)`. |
 | TelegramBotClient | backend/services/telegram_bot_client.py | Thin httpx wrapper for the Telegram Bot API. Methods: send_message, send_message_with_inline_keyboard (for reply_markup keyboards), edit_message_text (handles "message is not modified" gracefully), answer_callback_query (dismisses inline button loading indicator). |
+| SessionBuilderService | backend/services/session_builder_service.py | Synthesizes session documents from multiple voice notes. build(source_id, note_ids) enriches un-enriched notes then synthesizes via LLM. preview(source_id, note_ids) returns read-only summary. |
 
 ---
 
@@ -136,6 +140,8 @@ Main tables:
 | `/agent` | Switch to agent mode (LLM-powered chat) |
 | `/reflect` | Enter reflect mode and start a reflection on a non-internalized note from the active source. Posts the first question. |
 | `/reflect stats` | Show internalization progress for the active source |
+| `/build_doc` | Synthesize pending notes from the active source into a session document. Enriches un-enriched notes first, then synthesizes via LLM. |
+| `/build_doc stats` | Preview pending notes for a session document without synthesizing (no DB writes). |
 | `/current` | Show the current mode and pending state |
 | `/help` | List all available commands |
 | `/sources` | **Displays an interactive inline keyboard** (one button per source, ✅ marks the active source, pagination at 6 per page with ◀️/▶️ navigation). Tapping a source activates it and edits the message in place. `/switch <name>` is unchanged. |
