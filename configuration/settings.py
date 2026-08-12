@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     REFLECTION_MIN_AVG_SCORE: int = 8
     REFLECTION_MIN_REVIEWS: int = 2
 
+    # Session synthesis
+    SESSION_SYNTHESIS_MODEL: str = "gpt-5.6-luna"
+    SESSION_SYNTHESIS_REASONING_EFFORT: str = "medium"
+
     # Label creation (safety ceiling, not a target — the LLM decides per note)
     MAX_LLM_LABEL_CREATIONS_PER_RUN: int = 10
 

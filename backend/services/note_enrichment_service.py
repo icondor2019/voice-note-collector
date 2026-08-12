@@ -83,6 +83,73 @@ class NoteEnrichmentService:
                     label_ids,
                 )
 
+    async def enrich_specific_notes(self, note_ids: list[str]) -> None:
+        """Enrich only the given note IDs.
+
+        Same prompt, same JSON parsing, same MAX_LLM_LABEL_CREATIONS_PER_RUN cap
+        as run_process(). Used by SessionBuilderService.build() before synthesis.
+        """
+        if not note_ids:
+            return
+
+        # Fetch all pending notes with source, then filter to the requested IDs
+        all_pending = await self._details_repo.get_pending_notes_with_source()
+        pending_notes = [
+            note
+            for note in all_pending
+            if note.get("voice_note_uuid") in note_ids
+        ]
+        if not pending_notes:
+            logger.info("note_enrichment.enrich_specific.no_matching_notes")
+            return
+
+        labels = await self._labels_repo.list_labels()
+        logger.info(
+            "note_enrichment.enrich_specific.start",
+            extra={"count": len(pending_notes), "label_count": len(labels)},
+        )
+
+        labels_by_dedup_key = {label_utils.dedup_key(label["label"]): label for label in labels}
+        remaining_budget = self._settings.MAX_LLM_LABEL_CREATIONS_PER_RUN
+
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for note in pending_notes:
+            source_id = note.get("source_id")
+            if not source_id:
+                logger.warning("note_enrichment.enrich_specific.missing_source_id", extra={"note": note})
+                continue
+            grouped.setdefault(source_id, []).append(note)
+
+        for source_id, notes in grouped.items():
+            for batch_start in range(0, len(notes), 5):
+                notes_batch = notes[batch_start : batch_start + 5]
+                logger.info(
+                    "note_enrichment.enrich_specific.batch_start",
+                    extra={"source_id": source_id, "batch_size": len(notes_batch)},
+                )
+                results = await self._enrich_batch(notes_batch, labels)
+                logger.info(
+                    "note_enrichment.enrich_specific.batch_complete",
+                    extra={"source_id": source_id, "result_count": len(results)},
+                )
+                for result in results:
+                    label_ids = list(result["label_ids"])
+                    for raw_name in result.get("new_labels", []):
+                        resolved_id, remaining_budget = await self._resolve_new_label(
+                            raw_name, labels, labels_by_dedup_key, remaining_budget
+                        )
+                        if resolved_id is not None and resolved_id not in label_ids:
+                            label_ids.append(resolved_id)
+
+                    await self._details_repo.update_enrichment(
+                        result["voice_note_uuid"],
+                        result["title"],
+                    )
+                    await self._note_labels_repo.replace_llm_labels(
+                        result["voice_note_uuid"],
+                        label_ids,
+                    )
+
     async def _resolve_new_label(
         self,
         raw_name: str,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Optional
 
 from loguru import logger
 
@@ -19,6 +20,10 @@ from backend.services.reflection_service import (
     NoActiveSourceError,
     NoNotesError,
     ReflectionService,
+)
+from backend.services.session_builder_service import (
+    NoValidNotesError,
+    SessionBuilderService,
 )
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
@@ -49,6 +54,8 @@ HELP_MESSAGE = (
     "⚙️ /default — set default source\n"
     "🧠 /reflect — start a reflection question\n"
     "🔢 /reflect stats — show internalization progress\n"
+    "📚 /build_doc — synthesize pending notes into a session document\n"
+    "📊 /build_doc stats — preview pending notes without synthesizing\n"
     "❓ /help — show this message\n\n"
     "⚙️ Commands that require arguments:\n\n"
     "➕ /create <name> — create a new source\n"
@@ -71,12 +78,14 @@ class TelegramCommandHandler:
         labels_repository: LabelsRepository,
         chat_mode_service: ChatModeService,
         reflection_service: ReflectionService,
+        session_builder_service: Optional[SessionBuilderService] = None,
     ) -> None:
         self._source_service = source_service
         self._bot_client = bot_client
         self._labels_repository = labels_repository
         self._chat_mode_service = chat_mode_service
         self._reflection_service = reflection_service
+        self._session_builder_service = session_builder_service
 
     def _parse_command(self, text: str) -> tuple[str, str]:
         normalized = text.strip()
@@ -104,6 +113,11 @@ class TelegramCommandHandler:
             reply = await self._handle_label(argument)
         elif command == "/reflect":
             reply = await self._handle_reflect(from_user_id, argument)
+        elif command == "/build_doc":
+            if argument == "stats":
+                reply = await self._handle_build_doc_stats(from_user_id)
+            else:
+                reply = await self._handle_build_doc(from_user_id, chat_id)
         elif command == "/agent":
             reply = self._handle_agent_mode()
         elif command == "/note":
@@ -267,6 +281,86 @@ class TelegramCommandHandler:
             )
         except NoActiveSourceError:
             return "⚠️ No active source. Use /switch or /default to set one."
+
+    async def _handle_build_doc(self, telegram_user_id: Optional[int], chat_id: int | str) -> str:
+        if not self._session_builder_service:
+            return "⚠️ Session builder service is not configured."
+
+        active = await self._source_service.get_active_source()
+        if not active:
+            return "⚠️ No active source. Use /switch or /default to set one."
+
+        source_id = active["id"]
+
+        # Query pending notes via the session documents repository
+        # We need to access it through the builder service's internal repo
+        pending_note_ids = await self._session_builder_service._session_docs_repo.get_pending_note_ids(
+            source_id
+        )
+        if not pending_note_ids:
+            return "⚠️ No pending notes in this source."
+
+        # Send interim message
+        note_count = len(pending_note_ids)
+        await self._bot_client.send_message(
+            chat_id, f"⏳ Enriching {note_count} notes + synthesizing document…"
+        )
+
+        try:
+            document = await self._session_builder_service.build(source_id, pending_note_ids)
+        except NoValidNotesError:
+            return "⚠️ No valid notes remaining."
+
+        title = document.get("title") or "Untitled"
+        content = document.get("content") or ""
+        content_preview = content[:200] + "…" if len(content) > 200 else content
+
+        return (
+            f"📚 **{title}**\n\n"
+            f"{content_preview}\n\n"
+            f"📚 {note_count} notes synthesized"
+        )
+
+    async def _handle_build_doc_stats(self, telegram_user_id: Optional[int]) -> str:
+        if not self._session_builder_service:
+            return "⚠️ Session builder service is not configured."
+
+        active = await self._source_service.get_active_source()
+        if not active:
+            return "⚠️ No active source. Use /switch or /default to set one."
+
+        source_id = active["id"]
+        source_name = active.get("source_name", "unknown")
+
+        pending_note_ids = await self._session_builder_service._session_docs_repo.get_pending_note_ids(
+            source_id
+        )
+        if not pending_note_ids:
+            return "⚠️ No pending notes in this source."
+
+        preview = await self._session_builder_service.preview(source_id, pending_note_ids)
+
+        pending_count = preview["pending_count"]
+        un_enriched_count = preview["un_enriched_count"]
+        time_range = preview.get("time_range") or "N/A"
+
+        lines = [
+            f"📊 {source_name} · Session Document Preview\n",
+            f"📝 Pending notes: {pending_count}",
+            f"⏳ Un-enriched: {un_enriched_count}",
+            f"🕐 Time range: {time_range}\n",
+        ]
+
+        for note in preview.get("notes", [])[:10]:
+            title = note.get("title", "")[:60]
+            status = note.get("status", "created")
+            status_icon = "✅" if status == "enriched" else "⏳"
+            lines.append(f"  {status_icon} {title}")
+
+        if len(preview.get("notes", [])) > 10:
+            lines.append(f"  … and {len(preview['notes']) - 10} more")
+
+        return "\n".join(lines)
 
     def _handle_unknown_text(self) -> str:
         return UNKNOWN_TEXT

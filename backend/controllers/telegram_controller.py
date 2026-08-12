@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from langchain_openai import ChatOpenAI
 from loguru import logger
@@ -10,17 +11,21 @@ from backend.repositories.chat_memory_repository import ChatMemoryRepository
 from backend.repositories.labels_repository import LabelsRepository
 from backend.repositories.reflection_repository import ReflectionRepository
 from backend.repositories.repository_errors import RepositoryError
+from backend.repositories.session_documents_repository import SessionDocumentsRepository
 from backend.utils.security import verify_telegram_secret
 from backend.repositories.sources_repository import SourcesRepository
 from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_note_details_repository import VoiceNoteDetailsRepository
+from backend.repositories.voice_note_labels_repository import VoiceNoteLabelsRepository
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.agents import HintAgent, QuestionAgent, ScorerAgent
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.chat_agent_service import ChatAgentService
 from backend.services.multi_agent_service import MultiAgentService
+from backend.services.note_enrichment_service import NoteEnrichmentService
 from backend.services.note_selector_service import NoteSelectorService
 from backend.services.reflection_service import ReflectionService
+from backend.services.session_builder_service import SessionBuilderService
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import TelegramCommandHandler
@@ -125,6 +130,70 @@ def get_note_selector_service(
 
 
 # ------------------------------------------------------------------ #
+#  Session Documents
+# ------------------------------------------------------------------ #
+
+def get_session_documents_repository(
+    client: Any = Depends(get_supabase),
+) -> SessionDocumentsRepository:
+    return SessionDocumentsRepository(client=client)
+
+
+def get_voice_note_labels_repository(
+    client: Any = Depends(get_supabase),
+) -> VoiceNoteLabelsRepository:
+    return VoiceNoteLabelsRepository(client=client)
+
+
+def get_labels_repository(
+    client: Any = Depends(get_supabase),
+) -> LabelsRepository:
+    return LabelsRepository(client=client)
+
+
+def get_note_enrichment_service(
+    details_repository: VoiceNoteDetailsRepository = Depends(
+        get_voice_note_details_repository
+    ),
+    voice_notes_repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
+    labels_repository: LabelsRepository = Depends(get_labels_repository),
+    note_labels_repository: VoiceNoteLabelsRepository = Depends(
+        get_voice_note_labels_repository
+    ),
+) -> NoteEnrichmentService:
+    openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+    return NoteEnrichmentService(
+        details_repo=details_repository,
+        voice_notes_repo=voice_notes_repository,
+        labels_repo=labels_repository,
+        note_labels_repo=note_labels_repository,
+        openai_client=openai_client,
+        settings=settings,
+    )
+
+
+def get_session_builder_service(
+    session_documents_repository: SessionDocumentsRepository = Depends(
+        get_session_documents_repository
+    ),
+    voice_notes_repository: VoiceNotesRepository = Depends(get_voice_notes_repository),
+    voice_note_details_repository: VoiceNoteDetailsRepository = Depends(
+        get_voice_note_details_repository
+    ),
+    note_enrichment_service: NoteEnrichmentService = Depends(get_note_enrichment_service),
+) -> SessionBuilderService:
+    openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+    return SessionBuilderService(
+        session_documents_repository=session_documents_repository,
+        voice_notes_repository=voice_notes_repository,
+        voice_note_details_repository=voice_note_details_repository,
+        note_enrichment_service=note_enrichment_service,
+        openai_client=openai_client,
+        settings=settings,
+    )
+
+
+# ------------------------------------------------------------------ #
 #  Sub-agents (shared ChatOpenAI instance per plan §8)
 # ------------------------------------------------------------------ #
 
@@ -216,6 +285,7 @@ def get_command_handler(
     labels_repository: LabelsRepository = Depends(get_labels_repository),
     chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
     reflection_service: ReflectionService = Depends(get_reflection_service),
+    session_builder_service: SessionBuilderService = Depends(get_session_builder_service),
 ) -> TelegramCommandHandler:
     return TelegramCommandHandler(
         source_service=source_service,
@@ -223,6 +293,7 @@ def get_command_handler(
         labels_repository=labels_repository,
         chat_mode_service=chat_mode_service,
         reflection_service=reflection_service,
+        session_builder_service=session_builder_service,
     )
 
 
