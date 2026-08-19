@@ -1,40 +1,42 @@
-# 1. Feature: url_source_capture
+# 1. Feature: url_source_capture (v2 — routing fix + create-immediately-then-enrich)
 
 ---
 
 ## 2. Context
 
-The Voice Notes AI app currently creates sources via `/create <name>` (slugifies, activates) or `POST /api/sources` (manual fields). The `sources` table has columns: `source_name`, `author`, `comment`, `id`, `status`, `created_at`, `modified_at` — no `url` or `type`.
+The Voice Notes AI app currently creates sources via `/create <name>` (slugifies, activates) or `POST /api/sources` (manual fields). The `sources` table now has `url` and `type` columns (added in v1 of this feature).
 
-The user wants to evolve source creation into an agent-driven flow where:
-- Sending a message that is **entirely a URL** (nothing else) creates a source automatically
-- The agent fills a pydantic model with source information by **asking the user** for each field
-- Source types are auto-detected from URL domains (youtube, instagram, etc.) with user override
-- Non-URL sources (thoughts, books, courses) are triggered via `/create` (with or without args)
-- The source is activated by default after creation
+**v1 was implemented but failed in live testing.** Three bugs were found (see §10 Post-Mortem). This v2 plan fixes them and changes the core design.
 
-**Key constraints from user clarification:**
+### What went wrong in v1 (summary — full post-mortem in §10)
 
-- **Two triggers**: (1) a text message that is **entirely a URL** (the whole message is a URL — no additional text, comments, or commands), (2) explicit request via `/create` command
-- **No URL fetching / scraping**: Out of scope for this feature. The agent does NOT fetch metadata from the URL. The agent asks the user for all additional information instead. This avoids over-engineering for capturing just 1-2 optional fields.
-- **Always ask rule**: Even though `author`, `comment`, and other fields are optional (the user can decline to provide them), it is **NOT optional for the agent to ask**. The agent MUST always ask for every field. "Optional" means the user can leave it empty — it does NOT mean the agent can skip asking.
-- **Type auto-detection**: From URL domain (youtube.com → `youtube`, instagram.com → `instagram`, etc.). User can override.
-- **Source naming**: Prefix + word1 + word2 (3 words), agent suggests a name, user can override. Prefixes: `yt`, `ig`, `fb`, `lkn`, `wb`, `bk`, `cr`, `th`.
-- **Activation**: Default activate on creation (matching current `/create` behavior).
-- **Note mode + URL**: Auto-switch to agent mode when a URL-only message is detected in note mode. Stay in agent mode (user switches back manually).
-- **Separate flow**: URL capture is a separate flow from `/create <name>`. The `/create` command gains a new path: `/create` (no args) or `/create <name>` both trigger agent conversation to complete source info.
-- **Pydantic model**: `source_name` (required), `type` (required), `url` (optional), `author` (optional), `comment` (optional).
-- **Future-proofing the URL trigger**: The "whole message is a URL" rule is intentional. It leaves room for future features where a URL mixed with text (e.g. "tell me what this URL contains") is a different intent (exploration), not source creation. Mixing plain text with URLs must NOT trigger source creation.
+1. **Routing bug (critical)**: `MultiAgentService.handle()` hardcodes `source_create_context: None` and never hydrates it from `SourceCreateAgent.get_pending_context()`. After the initial URL message, all subsequent messages routed to the generic chat_node — the `SourceCreateAgent` was never invoked again. The agent literally said "I don't have the ability to save sources."
+2. **Design bug**: v1 created the source only AFTER collecting all fields. The user's intent is: **URL detection → source created immediately → agent enriches/updates afterward**. Source creation is mandatory on URL detection.
+3. **Prompt bug**: The system prompt was too generic. No examples of how to suggest names. The LLM suggested full titles ("El Futuro del Aprendizaje") instead of `yt-word1-word2` slugs.
+
+### v2 design changes
+
+- **Create-immediately-then-enrich**: When a URL is detected, the source is created IMMEDIATELY with auto-detected type, the URL, and a suggested name. The agent THEN asks the user for name override, author, and comment — and UPDATES the source. Source creation is not optional.
+- **Routing fix**: `MultiAgentService.handle()` must hydrate `source_create_context` from `SourceCreateAgent.get_pending_context(user_id)` before invoking the graph. The supervisor checks this to route to `source_create_node`.
+- **LLM-driven agent**: The `SourceCreateAgent` uses `ChatOpenAI` with model `gpt-5.6-luna` and `reasoning_effort="medium"` (same as session synthesis). The agent is LLM-driven, not a hardcoded state machine — the system prompt guides the conversation.
+- **Detailed system prompt**: The prompt includes naming conventions, type prefixes, the always-ask rule, AND concrete examples of name suggestions from URLs and from user descriptions.
+
+**Key constraints (carried from v1):**
+
+- **Two triggers**: (1) a text message that is **entirely a URL**, (2) explicit request via `/create` command
+- **No URL fetching / scraping**: Out of scope. The agent asks the user for all additional information.
+- **Always ask rule**: The agent MUST always ask for `author` and `comment`. "Optional" means the user can leave it empty — it does NOT mean the agent can skip asking.
+- **URL-only trigger**: The whole message must be a URL. URL + additional text does NOT trigger source creation (future-proofing for exploration intent).
+- **Source naming**: `prefix-word1-word2` (3 words, slugified). Prefixes: `yt`, `ig`, `fb`, `lkn`, `wb`, `bk`, `cr`, `th`. Agent suggests, user can override. 4-word exceptions only if user decides.
+- **Activation**: Source is active immediately after creation.
+- **Model**: `gpt-5.6-luna` with `reasoning_effort="medium"` (new setting `SOURCE_CREATE_MODEL` + `SOURCE_CREATE_REASONING_EFFORT`).
 
 **Existing patterns to follow:**
 
-- Repository pattern (`SourcesRepository`) for DB access
-- Service layer (`SourceService`) for business logic
-- `TelegramCommandHandler` for slash command routing
-- `MultiAgentService` with LangGraph StateGraph for agent routing
-- `ChatModeService` for mode management
-- Dependency injection via FastAPI `Depends()` in controllers
-- Migration SQL docs in `docs/sql/`
+- `SESSION_SYNTHESIS_MODEL` / `SESSION_SYNTHESIS_REASONING_EFFORT` pattern in `configuration/settings.py` — replicate for source creation
+- `session_builder_service.py` uses `openai_client.chat.completions.create(model=..., reasoning_effort=...)` — follow this pattern
+- Repository pattern (`SourcesRepository`), service layer (`SourceService`), `MultiAgentService` LangGraph StateGraph
+- `ChatModeService` for mode management, FastAPI `Depends()` for DI
 
 ---
 
@@ -42,315 +44,441 @@ The user wants to evolve source creation into an agent-driven flow where:
 
 ### 3.1 Requirements
 
-#### Schema
+#### Schema (already applied in v1 — no changes)
 
-1. The `sources` table must gain a `url` column (nullable text).
-2. The `sources` table must gain a `type` column (nullable text, CHECK constraint: `youtube`, `instagram`, `facebook`, `linkedin`, `web`, `book`, `course`, `thought`).
-3. Existing 22 sources remain unchanged (`url=NULL`, `type=NULL`).
+1. The `sources` table has `url` (nullable text) and `type` (nullable text, CHECK: youtube|instagram|facebook|linkedin|web|book|course|thought). ✅ Done.
+2. `SourcesRepository` has `create_source(url=, type=)`, `get_source_by_url()`, and `update_source(source_id, **fields)`. **NEW: add `update_source()` method** for the enrich phase.
 
-#### Source Pydantic Model
+#### Configuration (NEW)
 
-4. A `SourceCreateByAgentRequest` pydantic model must exist with fields:
-   - `source_name: str` (required) — slugified, prefix + word1 + word2
-   - `type: str` (required) — one of the 8 type values
-   - `url: Optional[str] = None`
-   - `author: Optional[str] = None`
-   - `comment: Optional[str] = None`
-5. The model must validate that `source_name` follows the prefix convention (starts with one of: `yt-`, `ig-`, `fb-`, `lkn-`, `wb-`, `bk-`, `cr-`, `th-`).
+3. Add `SOURCE_CREATE_MODEL: str = "gpt-5.6-luna"` to `configuration/settings.py`.
+4. Add `SOURCE_CREATE_REASONING_EFFORT: str = "medium"` to `configuration/settings.py`.
 
-#### URL Detection Service
+#### Source Pydantic Model (already exists — minor update)
 
-6. A `UrlDetectorService` must exist with a `is_url(text: str) -> bool` method that returns `True` **only if the entire message (after trimming whitespace) is a URL**. If the message contains any additional text, words, or commands beyond the URL, it must return `False`.
-7. A `extract_url(text: str) -> str` method (or the trimmed text itself) returns the URL when `is_url` is `True`.
-8. URL detection must handle common formats: `https://...`, `http://...`, `www....`, and bare domains like `youtube.com/...`.
-9. **Critical**: A message like `"check this https://youtube.com/watch?v=abc"` must NOT trigger source creation — it contains additional text. Only a message that is purely a URL triggers the flow.
+5. `SourceCreateByAgentRequest` exists with `source_name`, `type`, `url`, `author`, `comment` + prefix validation. ✅
+6. **NEW**: Add `SourceUpdateRequest` pydantic model with optional fields (`source_name`, `author`, `comment`) for the enrich/update phase.
 
-#### Source Type Resolver
+#### URL Detection Service (already exists — no changes)
 
-10. A `SourceTypeResolver` must exist with a `resolve_type(url: str) -> str` method that maps URL domains to source types:
-    - `youtube.com`, `youtu.be` → `youtube`
-    - `instagram.com` → `instagram`
-    - `facebook.com`, `fb.com` → `facebook`
-    - `linkedin.com` → `linkedin`
-    - Everything else → `web`
-11. Non-URL source types (`book`, `course`, `thought`) are set by the agent during conversation, not by URL detection.
+7. `UrlDetectorService.is_url(text) -> bool` (anchored regex, whole-message-is-URL). ✅
+8. `UrlDetectorService.extract_url(text) -> str`. ✅
 
-#### Source Name Suggestion
+#### Source Type Resolver (already exists — no changes)
 
-12. The agent must suggest a source name based on:
-    - The source type prefix (e.g., `yt-` for youtube)
-    - The URL itself (domain, path segments) — the agent can derive 1-2 meaningful words from the URL structure since no metadata is fetched
-    - Format: `prefix-word1-word2` (3 words, slugified)
-13. The user can accept the suggestion or provide their own name.
-14. For non-URL sources (book, course, thought), the agent asks the user for a name and suggests one based on the conversation context.
+9. `SourceTypeResolver.resolve_type(url) -> str`. ✅
 
-#### Agent Source Creation Flow
+#### Repository Updates (NEW: add update_source)
 
-15. When a message that is **entirely a URL** is received (any mode):
-    a. Auto-switch to agent mode if not already in agent mode.
-    b. Resolve source type from URL domain.
-    c. Generate a suggested source name from the URL.
-    d. Present to the user: "📎 Source detected: [type]\n🔗 [url]\n📝 Suggested name: [suggested-name]\n\nDo you want to use this name, or provide a different one?"
-    e. If user accepts: use the suggested name. If user provides a different name: validate it.
-    f. **Always ask** the user for `author` and `comment` (the user may decline, but the agent must ask).
-    g. Create the source with all collected fields, activate it, confirm.
+10. Add `update_source(source_id: str, source_name: Optional[str] = None, author: Optional[str] = None, comment: Optional[str] = None) -> Optional[dict]` to `SourcesRepository`. This is used by the enrich phase to update the source after creation.
 
-16. When `/create` (no args) is used:
-    a. Agent asks: "What type of source is this? (book, course, thought, or paste a URL)"
-    b. Based on response, agent asks for source name (suggest if possible) and other fields.
-    c. **Always ask** for `author` and `comment`.
-    d. Create the source, activate it, confirm.
+#### Service Updates (NEW: add update method)
 
-17. When `/create <name>` is used (with a name argument):
-    a. If the argument is a URL: treat as URL trigger (flow 15).
-    b. If the argument is a name: validate it, then ask for type and optional fields (author, comment).
-    c. **Always ask** for `author` and `comment`.
-    d. Create the source, activate it, confirm.
+11. Add `update_source(source_id: str, **fields) -> Optional[dict]` to `SourceService` that delegates to the repository.
 
-#### Repository & Service Updates
+#### Source Create Agent (REWRITE — LLM-driven)
 
-18. `SourcesRepository.create_source()` must accept optional `url` and `type` parameters.
-19. `SourceService.create_source_and_optionally_activate()` must accept optional `url` and `type` parameters.
-20. `SourcesRepository` must support querying sources by URL (to detect duplicates).
+12. The `SourceCreateAgent` must use `ChatOpenAI` (or `openai.OpenAI`) with `model=settings.SOURCE_CREATE_MODEL` and `reasoning_effort=settings.SOURCE_CREATE_REASONING_EFFORT`.
+13. The agent must use the detailed system prompt (see §3.3) with naming conventions, type prefixes, always-ask rule, AND concrete examples of name suggestions.
+14. **URL trigger flow (create-immediately-then-enrich)**:
+    a. URL detected → auto-switch to agent mode.
+    b. Resolve type from URL domain.
+    c. Check for duplicate URL → if exists, warn + offer /switch.
+    d. **CREATE THE SOURCE IMMEDIATELY** with: `url`, `type`, `source_name=<suggested>`, `status=active`. This is mandatory — the source exists in the DB right now.
+    e. Send confirmation: "✅ Source created: [name] (type, url). Let me get a few more details."
+    f. Ask the user if they want to keep the suggested name or change it.
+    g. **Always ask** for `author` (user can decline).
+    h. **Always ask** for `comment` (user can decline).
+    i. UPDATE the source with any new info (name override, author, comment) via `update_source()`.
+    j. Send final confirmation with all fields.
+15. **`/create` (no args) flow**: agent asks for type → asks for name (suggests one) → **always asks** for author + comment → creates source → activates → confirms.
+16. **`/create <name>` flow**: validate name prefix → ask for type → **always asks** for author + comment → create source → activate → confirms.
+17. **`/create <url>` flow**: treat as URL trigger (flow 14).
 
-#### Telegram Command Handler Updates
+#### Multi-Agent Service Updates (CRITICAL FIX)
 
-21. `_handle_create()` must detect if the argument is a URL and route to the agent flow.
-22. `_handle_create()` with no argument must route to the agent flow for non-URL source creation.
-23. The agent conversation state must be tracked (pending source creation context) so the agent can collect multi-turn information.
+18. **`MultiAgentService.handle()` must hydrate `source_create_context`** from `SourceCreateAgent.get_pending_context(telegram_user_id)` before invoking the graph. If a pending context exists, set it in the state so the supervisor routes to `source_create_node`.
+19. The supervisor routing logic: `if state.get("source_create_context") is not None → route to source_create_node`. This already exists but was dead code because the context was always None.
+20. After `source_create_node` completes (conversation done), clear the pending context via `SourceCreateAgent.clear_pending(user_id)`.
 
-#### Message Handler Updates
+#### Telegram Message Handler (minor fix)
 
-24. `TelegramMessageHandler.handle()` must check if the **entire message is a URL** before the current mode-based routing.
-25. If a URL-only message is detected in note mode, auto-switch to agent mode and route to the URL source creation flow.
-26. If a URL-only message is detected in agent mode, route to the URL source creation flow (not the generic chat agent).
-27. A message that contains a URL plus additional text must NOT trigger source creation — it follows normal mode routing.
+21. The URL-only detection (line 99-111) already routes to `source_create_agent.start_url_flow()`. This is correct for the first message. ✅
+22. **The fix is in MultiAgentService** (§18): subsequent non-URL messages must reach `source_create_node` because the pending context is hydrated. No change needed in the message handler itself — it routes to `_route_to_multi_agent()` for agent-mode text, and the MultiAgentService now correctly routes to `source_create_node`.
 
-#### Multi-Agent Service Updates
+#### Telegram Command Handler (already done — no changes)
 
-28. The `MultiAgentService` supervisor must recognize a "source_create" intent and route to a new `source_create_node`.
-29. A new `SourceCreateAgent` (or node in the existing graph) must handle the multi-turn source creation conversation.
-30. The agent must use a system prompt that includes the naming conventions, type prefixes, the pydantic model schema, and the **always-ask rule** (the agent must ask for every optional field even though the user can decline).
+23. `/create` routes to `source_create_agent.start_create_flow()`. ✅
+
+#### Controller Updates (NEW: wire model to agent)
+
+24. Update `telegram_controller.py`: the `get_source_create_agent()` dependency must pass the LLM client (OpenAI with `SOURCE_CREATE_MODEL` + `SOURCE_CREATE_REASONING_EFFORT`) to the `SourceCreateAgent`.
 
 ---
 
 ### 3.2 Acceptance Criteria
 
-1. Sending `https://www.youtube.com/watch?v=abc123` (and nothing else) in a message creates a source with `type=youtube`, `url=https://www.youtube.com/watch?v=abc123`, `source_name=yt-suggested-name`, `status=active`.
-2. Sending `https://instagram.com/p/xyz` (and nothing else) creates a source with `type=instagram`, name prefixed `ig-`, agent asks user for name/author/comment.
-3. Sending `check this https://youtube.com/watch?v=abc` (URL + additional text) does NOT trigger source creation — follows normal mode routing.
-4. Sending `/create` (no args) triggers agent conversation to create a non-URL source (book, course, thought).
-5. Sending `/create my-source` triggers agent conversation to complete source info (type, author, comment).
-6. Sending `/create https://youtube.com/abc` treats the URL as a URL trigger and follows the URL flow.
-7. Source names follow the prefix convention: `yt-`, `ig-`, `fb-`, `lkn-`, `wb-`, `bk-`, `cr-`, `th-`.
-8. Agent suggests a 3-word source name; user can override.
-9. New sources are activated by default (become the active source).
-10. URL-only detection works in both note mode and agent mode (auto-switches from note mode).
-11. Duplicate URL detection: if a source with the same URL already exists, warn the user and offer to switch to it.
-12. Existing 22 sources remain unchanged (`url=NULL`, `type=NULL`).
-13. The `type` column CHECK constraint enforces valid values.
-14. The agent **always asks** for `author` and `comment` — the user can decline, but the agent must not skip asking.
+1. Sending `https://www.youtube.com/watch?v=abc123` (and nothing else) **immediately creates** a source with `type=youtube`, `url=...`, `source_name=yt-<suggested>`, `status=active`. The source EXISTS in the DB before the agent asks any questions.
+2. After immediate creation, the agent asks the user for name override, author, and comment. The agent UPDATES the source with the user's answers.
+3. Sending `https://instagram.com/p/xyz` (and nothing else) immediately creates a source with `type=instagram`, name prefixed `ig-`, then agent asks for name/author/comment.
+4. Sending `check this https://youtube.com/watch?v=abc` (URL + text) does NOT trigger source creation.
+5. Sending `/create` (no args) triggers agent conversation to create a non-URL source.
+6. Sending `/create my-source` triggers agent conversation to complete source info.
+7. Source names follow `prefix-word1-word2` (3 words). Agent suggestions follow this format exactly.
+8. The agent **always asks** for `author` and `comment` — the user can decline, but the agent must not skip asking.
+9. **Routing fix**: After the initial URL message, subsequent text messages (the user's answers) reach `source_create_node`, NOT the generic chat_node. The agent continues the source creation conversation.
+10. Duplicate URL detection: if a source with the same URL already exists, warn the user and offer to switch.
+11. The agent uses `gpt-5.6-luna` with `reasoning_effort="medium"`.
+12. The agent's name suggestions are short slugs (`yt-fin-aprendizaje`), NOT full titles ("El Futuro del Aprendizaje").
+
+---
+
+### 3.3 System Prompt (DETAILED — with examples)
+
+The `SourceCreateAgent` must use this system prompt (stored in `backend/services/source_create_agent.py` or a dedicated prompt module):
+
+```
+You are a source creation assistant for a voice-note knowledge base app.
+Your job is to help the user create and enrich sources by collecting information
+through conversation.
+
+## CRITICAL: Source Creation Is Mandatory
+When a URL is detected, the source is ALREADY CREATED in the database with an
+auto-generated name and type. Your job is to ENRICH it: ask the user if they
+want to change the name, and collect author and comment. You are NOT deciding
+whether to create — it is already done. You are completing the information.
+
+## Source Naming Convention (STRICT)
+Every source name MUST follow this format:
+  prefix-word1-word2
+
+- Exactly 3 words separated by hyphens (slugified: lowercase, no spaces, no special chars).
+- 4 words ONLY if the user explicitly insists.
+- The prefix identifies the source type.
+
+### Valid Prefixes and Types
+| Prefix | Type      | Use for                          |
+|--------|-----------|----------------------------------|
+| yt-    | youtube   | YouTube videos                   |
+| ig-    | instagram | Instagram posts                  |
+| fb-    | facebook  | Facebook posts                   |
+| lkn-   | linkedin  | LinkedIn posts                   |
+| wb-    | web       | Any other web URL                |
+| bk-    | book      | Books                            |
+| cr-    | course    | Online courses                   |
+| th-    | thought   | Personal thoughts and ideas      |
+
+### Name Suggestion Examples
+
+**From a URL (no metadata fetched — derive from URL structure):**
+- URL: https://www.youtube.com/watch?v=abc123
+  → Suggest: yt-youtube-video (fallback when path has no words)
+  → Better: yt-regression-metrics (if URL path contains recognizable words)
+- URL: https://youtube.com/watch?v=abc&topic=machine-learning
+  → Suggest: yt-machine-learning
+- URL: https://medium.com/@user/scaling-apis-with-fastapi-12345
+  → Suggest: wb-scaling-apis
+- URL: https://linkedin.com/pulse/machine-learning-trends-2024
+  → Suggest: lkn-machine-trends
+- URL: https://instagram.com/p/Cxyz123/
+  → Suggest: ig-instagram-post (fallback — IG paths are opaque)
+
+**From a user description (for non-URL sources like books, courses, thoughts):**
+- User says: "It's a book about parasitic minds by Pablo Malo"
+  → Suggest: bk-parasitic-minds
+- User says: "A course about AWS for developers"
+  → Suggest: cr-aws-developers
+- User says: "I want to capture thoughts about moral philosophy"
+  → Suggest: th-moral-philosophy
+- User says: "El video trata sobre el fin del aprendizaje, entrevista de Javier Maza"
+  → Suggest: yt-fin-aprendizaje
+- User says: "It's about scaling APIs"
+  → Suggest: wb-scaling-apis
+
+### Name Suggestion Rules
+1. Extract 1-2 meaningful words from the URL path or the user's description.
+2. Slugify: lowercase, hyphens, no accents, no special characters.
+3. Spanish is fine: "fin del aprendizaje" → fin-aprendizaje (drop stop words: del, la, el, de).
+4. Keep it SHORT. 2 meaningful words + prefix = 3 total. That's the goal.
+5. If the URL path is opaque (e.g., /watch?v=abc), use a generic fallback like
+   "video", "post", "article" as the second word.
+6. NEVER suggest a full title or sentence as the name. "El Futuro del Aprendizaje" is WRONG.
+   "yt-fin-aprendizaje" is RIGHT.
+
+## ALWAYS-ASK RULE (CRITICAL)
+You MUST always ask the user for ALL of these fields, even though they are optional:
+1. source_name — suggest one, but ask if the user wants a different name
+2. author — you MUST ask, even though the user can decline
+3. comment — you MUST ask, even though the user can decline
+
+"Optional" means the user can leave it empty — it does NOT mean you can skip asking.
+If the user says "skip", "none", "no", or "n/a", accept it and move on.
+
+## Conversation Flow (URL trigger — source already created)
+1. The system tells you the source was created with: {name}, {type}, {url}.
+2. Tell the user: "✅ Source created: {name} ({type}). I suggested the name above.
+   Would you like to keep it or change it?"
+3. If the user provides a new name: validate it has a valid prefix, update the source.
+4. Ask: "👤 Who is the author? (or say 'skip')"
+5. Ask: "💬 Any comment about this source? (or say 'skip')"
+6. Update the source with author/comment if provided.
+7. Confirm: "✅ Source {name} is ready! Author: {author}. Comment: {comment}."
+
+## Conversation Flow (/create — no URL)
+1. Ask: "What type of source? (youtube, instagram, facebook, linkedin, web, book,
+   course, thought) — or paste a URL."
+2. Once you know the type, suggest a name and ask if the user wants to keep it.
+3. Ask for author (always).
+4. Ask for comment (always).
+5. Create the source, activate it, confirm.
+
+## Output Format
+When you have collected all information and need to update/create the source,
+respond with a JSON block so the system can parse it:
+```json
+{
+  "action": "update_source",
+  "source_name": "yt-fin-aprendizaje",
+  "author": "Javier Maza",
+  "comment": "Entrevista sobre el fin del aprendizaje"
+}
+```
+If the user is just answering a question mid-conversation, respond naturally in
+text — do NOT output JSON until you have all the information.
+```
 
 ---
 
 ## 4. Design
 
-### 4.1 Architecture
+### 4.1 Architecture (v2)
 
-**URL-Only Detection → Type Resolution → Agent Conversation (always asks) → Source Creation**
+**URL-Only Detection → IMMEDIATE Source Creation → Agent Enrichment (LLM-driven, always asks) → Source Update**
 
-The flow is:
+```
+Message received
+    │
+    ├─ Is entire message a URL? ──YES──→ start_url_flow()
+    │                                        │
+    │                                        ├─ Resolve type from domain
+    │                                        ├─ Check duplicate URL
+    │                                        ├─ CREATE SOURCE IMMEDIATELY (url, type, suggested name, active)
+    │                                        ├─ Set pending context (source_id, step=AWAITING_NAME_CONFIRM)
+    │                                        └─ Send: "✅ Source created: {name}. Keep it or change it?"
+    │
+    ├─ Is it /create? ──YES──→ start_create_flow()
+    │                              │
+    │                              └─ Agent conversation (no immediate creation — collect type, name first)
+    │
+    └─ Other text in agent mode ──→ MultiAgentService.handle()
+                                        │
+                                        ├─ Hydrate source_create_context from SourceCreateAgent.get_pending_context()
+                                        │
+                                        ├─ context is NOT None? ──YES──→ source_create_node
+                                        │                                    │
+                                        │                                    └─ LLM-driven conversation:
+                                        │                                       ask name override, author, comment
+                                        │                                       → update_source() when done
+                                        │                                       → clear_pending()
+                                        │
+                                        └─ context is None? ──YES──→ chat_node (generic chat)
+```
 
-1. **Entry points**: A text message that is entirely a URL OR `/create` command
-2. **Detection**: `UrlDetectorService.is_url(text)` returns `True` only if the whole message is a URL
-3. **Type resolution**: `SourceTypeResolver.resolve_type(url)` maps domain → type
-4. **Name suggestion**: Agent generates `prefix-word1-word2` from the URL structure (no fetching)
-5. **Conversation**: Agent presents suggestion, **always asks** for author and comment (user can decline)
-6. **Creation**: `SourceService.create_source_and_optionally_activate()` with all collected fields
-7. **Confirmation**: Agent confirms creation, source is active
+### 4.2 Key Design Decisions (v2)
 
-**Integration points:**
+1. **Create-immediately-then-enrich**: The source is created the moment a URL is detected. The agent's job is to enrich (name override, author, comment) by UPDATING the existing source. This guarantees the source always exists — even if the user abandons the conversation.
 
-- `TelegramMessageHandler` → detects URL-only messages before routing to note/agent mode
-- `MultiAgentService` → new `source_create_node` in the StateGraph
-- `TelegramCommandHandler` → `/create` command routes to agent flow
-- `SourcesRepository` → updated `create_source()` with `url` and `type` params
+2. **LLM-driven conversation**: The `SourceCreateAgent` uses `gpt-5.6-luna` with `reasoning_effort="medium"` and the detailed system prompt. The LLM handles the natural conversation flow (suggesting names, asking for fields). The agent code parses the LLM's JSON output to call `update_source()`.
 
-### 4.2 File Structure
+3. **Routing fix**: `MultiAgentService.handle()` hydrates `source_create_context` from `SourceCreateAgent.get_pending_context(user_id)`. This was the critical v1 bug — the context was always None.
+
+4. **Pending context tracks source_id**: The `SourceCreateContext` now includes `source_id` (the ID of the already-created source) so the agent can update it during enrichment.
+
+### 4.3 File Structure (v2 changes)
 
 ```
 backend/
 ├── models/
-│   └── source.py                    # SourceCreateByAgentRequest pydantic model
+│   └── source.py                    # SourceCreateByAgentRequest + NEW: SourceUpdateRequest
 ├── services/
-│   ├── url_detector_service.py      # URL-only detection from text
-│   ├── source_type_resolver.py      # Domain → type mapping
-│   ├── source_create_agent.py       # Agent node for source creation conversation
-│   ├── source_service.py            # Updated: accept url, type params
-│   ├── multi_agent_service.py       # Updated: add source_create_node
-│   ├── telegram_command_handler.py  # Updated: /create routes to agent
-│   └── telegram_message_handler.py  # Updated: URL-only detection before mode routing
+│   ├── url_detector_service.py      # (no changes)
+│   ├── source_type_resolver.py      # (no changes)
+│   ├── source_create_agent.py       # REWRITE: LLM-driven, create-immediately-then-enrich
+│   ├── source_service.py            # NEW: add update_source()
+│   ├── multi_agent_service.py       # FIX: hydrate source_create_context
+│   ├── telegram_command_handler.py  # (no changes)
+│   └── telegram_message_handler.py  # (no changes — fix is in MultiAgentService)
 ├── repositories/
-│   └── sources_repository.py        # Updated: create_source with url, type
+│   └── sources_repository.py        # NEW: add update_source()
 └── controllers/
-    └── sources_controller.py        # Updated: SourceCreateRequest with url, type
+    └── telegram_controller.py       # NEW: wire LLM client to SourceCreateAgent
+
+configuration/
+└── settings.py                      # NEW: SOURCE_CREATE_MODEL, SOURCE_CREATE_REASONING_EFFORT
 
 docs/sql/
-└── source_url_type_migration.md     # Migration SQL for url + type columns
-
-specs/features/
-└── url_source_capture_plan.md       # This file
+└── source_url_type_migration.md     # (no changes — already applied)
 ```
 
 ---
 
-## 5. Tasks
+## 5. Tasks (v2 — only the changes needed)
 
-### Branch Setup
+### Configuration
 
-- [x] Create and checkout a new git branch `feat/url-source-capture` from the current branch before any implementation begins
-- [x] All subsequent work (schema migration, services, agent, handlers, tests) must be committed to this branch
-- [x] Branch is merged back only after the feature is verified and archived
+- [x] Add `SOURCE_CREATE_MODEL: str = "gpt-5.6-luna"` and `SOURCE_CREATE_REASONING_EFFORT: str = "medium"` to `configuration/settings.py`
 
-### Schema Migration
+### Repository
 
-- [x] Create `docs/sql/source_url_type_migration.md` with SQL to add `url` (nullable text) and `type` (nullable text with CHECK constraint) columns to the `sources` table
-- [x] Apply the migration to the Supabase database
+- [x] Add `update_source(source_id, source_name=None, author=None, comment=None)` method to `SourcesRepository`
+
+### Service
+
+- [x] Add `update_source(source_id, **fields)` method to `SourceService`
 
 ### Pydantic Model
 
-- [x] Create `backend/models/source.py` with `SourceCreateByAgentRequest` pydantic model (source_name, type, url, author, comment) and prefix validation
+- [x] Add `SourceUpdateRequest` model to `backend/models/source.py` (optional: source_name, author, comment)
 
-### URL Detection Service
+### Source Create Agent (REWRITE)
 
-- [x] Create `backend/services/url_detector_service.py` with `is_url(text: str) -> bool` (returns True only if the entire message is a URL) and `extract_url(text: str) -> str` using regex for http/https/www/bare-domain URLs
+- [x] Rewrite `backend/services/source_create_agent.py`:
+  - [x] Use `openai.OpenAI` client with `model=settings.SOURCE_CREATE_MODEL`, `reasoning_effort=settings.SOURCE_CREATE_REASONING_EFFORT`
+  - [x] Implement the detailed system prompt from §3.3 (with naming examples)
+  - [x] `start_url_flow()`: resolve type → check duplicate → **CREATE SOURCE IMMEDIATELY** → set pending context with `source_id` → send confirmation + ask name
+  - [x] `handle_response()`: LLM-driven conversation — pass user message + context to LLM, parse JSON output, call `update_source()` when done
+  - [x] `start_create_flow()`: LLM-driven conversation for `/create` (no immediate creation — collect type/name first, then create)
+  - [x] `SourceCreateContext` must include `source_id` (for the update phase)
 
-### Source Type Resolver
+### Multi-Agent Service (CRITICAL FIX)
 
-- [x] Create `backend/services/source_type_resolver.py` with `resolve_type(url: str) -> str` method mapping domains to types (youtube, instagram, facebook, linkedin, web)
+- [x] Fix `MultiAgentService.handle()`: hydrate `source_create_context` from `SourceCreateAgent.get_pending_context(telegram_user_id)` before invoking the graph
+- [x] Ensure supervisor routes to `source_create_node` when context is not None
+- [x] Clear pending context after conversation completes
 
-### Repository Updates
+### Controller
 
-- [x] Update `backend/repositories/sources_repository.py`: add `url` and `type` parameters to `create_source()` method
-- [x] Add `get_source_by_url(url: str)` method to `SourcesRepository` for duplicate detection
+- [x] Update `telegram_controller.py` `get_source_create_agent()`: pass OpenAI client with `SOURCE_CREATE_MODEL` + `SOURCE_CREATE_REASONING_EFFORT` to `SourceCreateAgent`
+- [x] Fix DI scoping bug: make `SourceCreateAgent` a module-level singleton (lazy init) so `_pending` dict survives across HTTP requests
 
-### Service Updates
+### Tests
 
-- [x] Update `backend/services/source_service.py`: add `url` and `type` parameters to `create_source_and_optionally_activate()` method
-- [x] Add duplicate URL check logic to `SourceService`
-
-### Source Name Suggestion
-
-- [x] Add `_suggest_source_name(source_type: str, url: Optional[str] = None) -> str` helper to the source create agent (prefix + 2 meaningful words derived from the URL structure, no fetching)
-
-### Source Create Agent
-
-- [x] Create `backend/services/source_create_agent.py` with a LangGraph node that handles multi-turn source creation conversation
-- [x] Implement system prompt with naming conventions, type prefixes, pydantic model schema, and the **always-ask rule**
-- [x] Implement URL trigger flow: detect type → suggest name from URL → **always ask** for author/comment → create source
-- [x] Implement `/create` (no args) flow: ask type → ask name → **always ask** for fields → create source
-- [x] Implement `/create <name>` flow: validate name → ask type → **always ask** for fields → create source
-- [x] Implement `/create <url>` flow: treat as URL trigger
-
-### Multi-Agent Service Updates
-
-- [x] Update `backend/services/multi_agent_service.py`: add `source_create_node` to the StateGraph
-- [x] Update supervisor routing to detect source creation intent (URL-only message or `/create` command)
-- [x] Add `SourceCreateContext` to `AgentState` for tracking pending source creation state
-
-### Telegram Command Handler Updates
-
-- [x] Update `backend/services/telegram_command_handler.py`: modify `_handle_create()` to detect URLs and route to agent flow
-- [x] Update `_handle_create()` with no argument to route to agent flow
-- [x] Update help message to document new `/create` behavior
-
-### Telegram Message Handler Updates
-
-- [x] Update `backend/services/telegram_message_handler.py`: add URL-only detection before mode-based routing in `handle()`
-- [x] Auto-switch to agent mode when URL-only message detected in note mode
-- [x] Route URL-only messages to source creation flow instead of generic chat agent
-- [x] Ensure messages with URL + additional text do NOT trigger source creation
-
-### Controller Updates
-
-- [x] Update `backend/controllers/sources_controller.py`: add `url` and `type` fields to `SourceCreateRequest`
-- [x] Update the POST endpoint to pass `url` and `type` to the service
+- [x] Test: URL detected → source created IMMEDIATELY (verify DB row exists before agent asks questions)
+- [x] Test: after immediate creation, agent asks for name override, author, comment
+- [x] Test: agent UPDATES the source with user's answers (verify DB row updated)
+- [x] Test: routing fix — subsequent text messages reach `source_create_node` (not chat_node) when pending context exists
+- [x] Test: `update_source()` repository method updates correct fields
+- [x] Test: name suggestions are short slugs (`yt-fin-aprendizaje`), not full titles
+- [x] Test: the agent always asks for author and comment
+- [x] Test: duplicate URL detection warns user
+- [x] Test: `/create` (no args) flow creates source after collecting info
+- [x] Re-run all existing tests (398 must still pass)
+- [x] Test: singleton pattern — same `SourceCreateAgent` instance returned across multiple `get_source_create_agent()` calls
+- [x] Test: multi-request flow — pending context set in request 1 is retrievable in request 2
 
 ### Documentation
 
-- [x] Update `docs/project_spec.md` to document the new source creation flow and schema changes
+- [x] Update `docs/project_spec.md` with the create-immediately-then-enrich flow
 
 ---
 
-## 6. Tests
+## 6. Tests (v2)
 
-- [x] Test `UrlDetectorService.is_url()` returns True for URL-only messages (https, http, www, bare domain)
-- [x] Test `UrlDetectorService.is_url()` returns False for URL + additional text (e.g. "check this https://youtube.com/abc")
-- [x] Test `UrlDetectorService.is_url()` returns False for plain text, commands, empty strings
-- [x] Test `SourceTypeResolver.resolve_type()` with all supported domains (youtube, youtu.be, instagram, facebook, fb.com, linkedin, generic web)
-- [x] Test `SourceCreateByAgentRequest` validation: valid prefix passes, invalid prefix raises error
-- [x] Test `SourcesRepository.create_source()` with `url` and `type` parameters
-- [x] Test `SourcesRepository.get_source_by_url()` returns correct source
-- [x] Test source name suggestion generates 3-word slug with correct prefix from URL
-- [x] Test URL-only detection in note mode triggers auto-switch to agent mode
-- [x] Test URL + text message does NOT trigger source creation (follows normal routing)
-- [x] Test `/create` (no args) triggers agent conversation
-- [x] Test `/create <url>` triggers URL source creation flow
-- [x] Test `/create <name>` triggers agent conversation for name-based creation
-- [x] Test the agent **always asks** for author and comment (even though they are optional)
-- [x] Test duplicate URL detection warns user
-- [x] Test existing sources remain unchanged after migration (url=NULL, type=NULL)
+- [x] Test URL → immediate source creation (source exists in DB with url, type, suggested name, status=active)
+- [x] Test agent enrichment updates the source (name override, author, comment)
+- [x] Test routing: pending context hydrated → supervisor routes to source_create_node
+- [x] Test routing: no pending context → supervisor routes to chat_node (generic chat)
+- [x] Test `SourcesRepository.update_source()` updates only provided fields
+- [x] Test `SourceUpdateRequest` model validation
+- [x] Test name suggestion from URL produces `prefix-word1-word2` slug
+- [x] Test name suggestion from user description produces `prefix-word1-word2` slug
+- [x] Test agent always asks for author and comment
+- [x] Test duplicate URL detection
+- [x] Test `/create` (no args) flow
+- [x] Test `/create <name>` flow
+- [x] Test `/create <url>` flow
+- [x] All 398 existing tests still pass (434 total: 398 existing + 36 new v2 tests)
 
 ---
 
 ## 7. Dependencies
 
-- Supabase database access for migration
-- `re` module for URL regex detection
-- Existing `MultiAgentService` and `ChatModeService` infrastructure
+- `openai` Python SDK (already installed — used by session_builder_service.py)
+- `gpt-5.6-luna` model (already used for session synthesis)
+- Supabase database (migration already applied)
+- Existing `MultiAgentService`, `ChatModeService`, `SourceService` infrastructure
 
 ---
 
 ## 8. Notes
 
-- **No URL fetching**: This feature deliberately does NOT fetch/scrape URL metadata. The agent asks the user for all additional information. This keeps the scope small and avoids over-engineering for 1-2 optional fields. Fetching can be added in a future feature.
-- **Always-ask rule**: The agent must always ask for every optional field (author, comment). "Optional" means the user can leave it empty — it does NOT mean the agent can skip asking. This is a hard requirement.
-- **URL-only trigger**: The URL trigger fires ONLY when the entire message is a URL. This is intentional to avoid complex text parsing and to leave room for future features where a URL mixed with text (e.g. "tell me what this URL contains") is a different intent (exploration), not source creation.
-- **URL regex**: Use a regex that validates the entire string is a URL (anchored `^...$`). Match `https?://...`, `www....`, and bare domains like `youtube.com/...`. The key is the whole message must be a URL.
-- **Agent state management**: The source creation flow is multi-turn. The agent needs to track context (partial source info) across messages. This is similar to how `ReflectionContext` works in the existing `MultiAgentService`.
-- **Slug validation**: The existing `slugify()` and `validate_slug_input()` utilities in `backend/utils/slug.py` should be reused for name validation.
-- **Migration safety**: Adding nullable columns is non-breaking. Existing queries that don't reference `url` or `type` will continue to work unchanged.
+- **Create-immediately-then-enrich**: This is the core v2 change. The source is created the moment a URL is detected. Even if the user abandons the conversation, the source exists with the URL, type, and a suggested name. The agent enriches afterward.
+- **LLM-driven agent**: The agent uses `gpt-5.6-luna` with `reasoning_effort="medium"`. The system prompt (§3.3) is detailed with examples. The LLM handles natural conversation; the agent code parses JSON output to call `update_source()`.
+- **Routing fix**: The v1 bug was that `MultiAgentService.handle()` hardcoded `source_create_context: None`. The fix is to hydrate it from `SourceCreateAgent.get_pending_context(user_id)`.
+- **No URL fetching**: Still out of scope. The agent asks the user for all additional info.
+- **Always-ask rule**: Still mandatory. The agent must ask for author and comment even though they're optional.
+- **Name suggestions**: The system prompt has concrete examples. The LLM must suggest `prefix-word1-word2` slugs, never full titles.
 
 ---
 
 ## 9. project_spec.md Alignment
 
-The following changes to `docs/project_spec.md` are required:
+- Update the source creation flow to document create-immediately-then-enrich
+- Document the `SOURCE_CREATE_MODEL` and `SOURCE_CREATE_REASONING_EFFORT` settings
+- Document the routing: URL → immediate creation → agent enrichment via `source_create_node`
 
-- **Sources section**: Add `url` (nullable text) and `type` (nullable text, CHECK: youtube|instagram|facebook|linkedin|web|book|course|thought) to the sources table documentation
-- **Source creation section**: Document the new agent-driven source creation flow (URL-only trigger + `/create` variants). Document the always-ask rule.
-- **Naming conventions section**: Document the source name prefix convention (yt-, ig-, fb-, lkn-, wb-, bk-, cr-, th-) and the 3-word naming rule
-- **Agent modes section**: Document the new source creation agent flow and its integration with the MultiAgentService
+---
+
+## 10. Post-Mortem (v1 failures — for reference)
+
+### Bug #1 — Routing (CRITICAL)
+**Symptom**: After sending a URL, the agent responded as a generic chatbot. It said "I don't have the ability to save sources."
+**Root cause**: `MultiAgentService.handle()` line 127: `"source_create_context": None` — always None, never hydrated. The supervisor check `if state.get("source_create_context") is not None` was dead code. Subsequent messages went to `chat_node` (generic LLM), not `source_create_node`.
+**Fix**: Hydrate `source_create_context` from `SourceCreateAgent.get_pending_context(user_id)` in `handle()` before invoking the graph.
+
+### Bug #2 — Design (create-after-collect vs create-immediately)
+**Symptom**: Source was never created because the conversation never completed (it was in the generic chat).
+**Root cause**: v1 created the source only at the END of the conversation (`_handle_comment_step`). If the conversation broke down (Bug #1), no source was created.
+**Fix**: Create the source IMMEDIATELY on URL detection. Enrich afterward via `update_source()`.
+
+### Bug #3 — Prompt (generic, no examples)
+**Symptom**: The LLM suggested full titles ("El Futuro del Aprendizaje: ¿Fin o Transformación?") instead of `yt-fin-aprendizaje` slugs.
+**Root cause**: The system prompt had no examples of name suggestions. The LLM defaulted to natural-language titles.
+**Fix**: Detailed system prompt (§3.3) with concrete examples of name suggestions from URLs and from user descriptions. Explicit rule: "NEVER suggest a full title. `yt-fin-aprendizaje` is RIGHT, `El Futuro del Aprendizaje` is WRONG."
+
+### Live conversation evidence (voice_note_chat_memory, 2026-08-19)
+- User sent YouTube URL → `start_url_flow()` fired correctly, set pending context
+- User sent description ("el video trata sobre...") → NOT a URL → routed to `MultiAgentService.handle()` → `source_create_context` was None → went to `chat_node` → generic chatbot
+- Agent suggested 6 long titles (wrong format)
+- User formatted the name themselves: "yt-fin-aprendizaje"
+- Agent said "Sounds great!" but didn't create the source
+- User asked "did you save the source?"
+- Agent: "I'm sorry, I don't have the ability to save sources."
 
 ---
 
 ## Execution Log
 
-- [2026-08-18 20:45] Agent: Backend | Status: in_progress | Started implementation of url_source_capture feature
-- [2026-08-18 20:46] Agent: Backend | Status: completed | Created branch feat/url-source-capture
-- [2026-08-18 20:46] Agent: Backend | Status: completed | Created docs/sql/source_url_type_migration.md and applied migration to Supabase (migration name: source_url_type)
-- [2026-08-18 20:47] Agent: Backend | Status: completed | Created backend/models/source.py with SourceCreateByAgentRequest pydantic model
-- [2026-08-18 20:47] Agent: Backend | Status: completed | Created backend/services/url_detector_service.py with anchored regex URL detection
-- [2026-08-18 20:47] Agent: Backend | Status: completed | Created backend/services/source_type_resolver.py with domain-to-type mapping
-- [2026-08-18 20:48] Agent: Backend | Status: completed | Updated SourcesRepository: added url/type params to create_source(), added get_source_by_url()
-- [2026-08-18 20:48] Agent: Backend | Status: completed | Updated SourceService: added url/type params, duplicate URL check
-- [2026-08-18 20:49] Agent: Backend | Status: completed | Created backend/services/source_create_agent.py with multi-turn conversation, always-ask rule, name suggestion
-- [2026-08-18 20:50] Agent: Backend | Status: completed | Updated MultiAgentService: added source_create_node, SourceCreateContext to AgentState, supervisor routing
-- [2026-08-18 20:50] Agent: Backend | Status: completed | Updated TelegramCommandHandler: /create routes to agent flow, updated help message
-- [2026-08-18 20:51] Agent: Backend | Status: completed | Updated TelegramMessageHandler: URL-only detection before mode routing, auto-switch to agent mode
-- [2026-08-18 20:51] Agent: Backend | Status: completed | Updated sources_controller: added url/type to SourceCreateRequest
-- [2026-08-18 20:51] Agent: Backend | Status: completed | Updated telegram_controller: wired SourceCreateAgent dependency
-- [2026-08-18 20:52] Agent: Backend | Status: completed | Created tests/test_url_source_capture.py (47 tests) and tests/test_url_source_capture_integration.py (8 tests)
-- [2026-08-18 20:53] Agent: Backend | Status: completed | Fixed test_sources_endpoints.py StubSourceService to accept url/type params
-- [2026-08-18 20:53] Agent: Backend | Status: completed | Updated docs/project_spec.md with new source creation flow documentation
-- [2026-08-18 20:53] Agent: Backend | Status: completed | All 398 tests pass (55 new + 343 existing)
+- [2026-08-18 20:45] Agent: Backend | Status: in_progress | Started implementation of url_source_capture feature (v1)
+- [2026-08-18 20:53] Agent: Backend | Status: completed | v1 implementation done, 398 tests pass
+- [2026-08-19 02:09] User | Live test failed | Agent behaved as generic chatbot, source never created
+- [2026-08-19 02:30] Agent: Orchestrator | Status: completed | Root cause analysis: 3 bugs identified (routing, design, prompt)
+- [2026-08-19 02:45] Agent: Orchestrator | Status: in_progress | v2 plan created — create-immediately-then-enrich, routing fix, detailed prompt with examples, luna model
+- [2026-08-19 03:00] Agent: Backend | Status: in_progress | Started v2 implementation
+- [2026-08-19 03:05] Agent: Backend | Status: completed | Configuration: added SOURCE_CREATE_MODEL + SOURCE_CREATE_REASONING_EFFORT to settings.py
+- [2026-08-19 03:07] Agent: Backend | Status: completed | Repository: added update_source() to SourcesRepository
+- [2026-08-19 03:08] Agent: Backend | Status: completed | Service: added update_source() to SourceService
+- [2026-08-19 03:09] Agent: Backend | Status: completed | Model: added SourceUpdateRequest to backend/models/source.py
+- [2026-08-19 03:10] Agent: Backend | Status: completed | Agent model: added source_id to SourceCreateContext TypedDict
+- [2026-08-19 03:15] Agent: Backend | Status: completed | REWROTE SourceCreateAgent: LLM-driven, create-immediately-then-enrich, detailed system prompt with examples, openai.OpenAI client with gpt-5.6-luna + reasoning_effort=medium
+- [2026-08-19 03:17] Agent: Backend | Status: completed | CRITICAL FIX: MultiAgentService.handle() now hydrates source_create_context from SourceCreateAgent.get_pending_context()
+- [2026-08-19 03:18] Agent: Backend | Status: completed | Controller: wired OpenAI client to SourceCreateAgent in telegram_controller.py
+- [2026-08-19 03:20] Agent: Backend | Status: completed | Updated v1 tests to match v2 behavior (immediate creation reply format)
+- [2026-08-19 03:25] Agent: Backend | Status: completed | Wrote 36 new v2 tests in test_url_source_capture_v2.py
+- [2026-08-19 03:26] Agent: Backend | Status: completed | All 434 tests pass (398 existing + 36 new v2)
+- [2026-08-19 03:27] Agent: Backend | Status: completed | Updated docs/project_spec.md with create-immediately-then-enrich flow
+- [2026-08-19 03:28] Agent: Backend | Status: completed | v2 implementation complete. All tasks done.
+- [2026-08-19 04:00] Agent: Backend | Status: in_progress | Fixing DI scoping bug: SourceCreateAgent created fresh per request, losing _pending dict
+- [2026-08-19 04:05] Agent: Backend | Status: completed | Made SourceCreateAgent a module-level singleton with lazy initialization in telegram_controller.py (matches ChatModeService pattern)
+- [2026-08-19 04:06] Agent: Backend | Status: completed | Added 8 singleton tests in test_source_create_agent_singleton.py — all pass
+- [2026-08-19 04:07] Agent: Backend | Status: completed | Full test suite: 442 passed (434 existing + 8 new), 0 failed

@@ -31,6 +31,7 @@ class ReflectionContext(TypedDict, total=False):
 class SourceCreateContext(TypedDict, total=False):
     """Tracks pending source creation state in AgentState."""
 
+    source_id: Optional[str]
     source_type: str
     url: Optional[str]
     suggested_name: Optional[str]

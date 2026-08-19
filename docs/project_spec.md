@@ -123,8 +123,8 @@ Main tables:
 | NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes |
 | ReflectionService | backend/services/reflection_service.py | Generates reflection questions via LLM, rates user responses (1-10), manages reflection state in Supabase, provides internalization stats via get_reflection_summary() |
 | NoteSelectorService | backend/services/note_selector_service.py | Selects a non-internalized note from a source's recent pool for reflection |
-| MultiAgentService | backend/services/multi_agent_service.py | Unified entry point. Owns a LangGraph `StateGraph` with `supervisor_node` → `chat_node` | `reflect_node` | `source_create_node`. `handle(user_message, telegram_user_id) -> MultiAgentResult` hydrates `pending_reflection`, invokes the graph, returns the reply + outcome. |
-| SourceCreateAgent | backend/services/source_create_agent.py | Multi-turn source creation conversation. Handles URL trigger, `/create` variants. Enforces always-ask rule (must ask for author and comment). Suggests source names from URL structure. |
+| MultiAgentService | backend/services/multi_agent_service.py | Unified entry point. Owns a LangGraph `StateGraph` with `supervisor_node` → `chat_node` | `reflect_node` | `source_create_node`. `handle(user_message, telegram_user_id) -> MultiAgentResult` hydrates `pending_reflection` AND `source_create_context` (from `SourceCreateAgent.get_pending_context()`), invokes the graph, returns the reply + outcome. The supervisor routes to `source_create_node` when a pending source creation context exists. |
+| SourceCreateAgent | backend/services/source_create_agent.py | LLM-driven (gpt-5.6-luna, reasoning_effort=medium) multi-turn source creation. **Create-immediately-then-enrich**: URL detection creates the source immediately in DB, then the agent enriches it (name override, author, comment) via `update_source()`. Uses detailed system prompt with naming examples. Handles `/create` variants. Enforces always-ask rule (must ask for author and comment). |
 | UrlDetectorService | backend/services/url_detector_service.py | Detects URL-only messages (entire message is a URL). Returns False for URL + additional text. |
 | SourceTypeResolver | backend/services/source_type_resolver.py | Maps URL domains to source types (youtube, instagram, facebook, linkedin, web). |
 | QuestionAgent | backend/services/agents/question_agent.py | Generates a reflection question for a single note. Wraps `QUESTION_GENERATION_PROMPT` (moved verbatim from `ReflectionService`). Returns `AgentResult(outcome="asked", reply=question_text, updates={question_type, question_text})`. |
@@ -153,7 +153,7 @@ Main tables:
 | `/create <url>` | Create a source from a URL (auto-detects type, suggests name) |
 | `/switch <name>` / `/default` / other source commands | Source management (unchanged) |
 
-**URL-only trigger**: Sending a message that is entirely a URL (no additional text) automatically triggers source creation. The system auto-detects the type from the domain, suggests a name, and the agent asks for author and comment (always-ask rule).
+**URL-only trigger**: Sending a message that is entirely a URL (no additional text) automatically triggers **create-immediately-then-enrich**: the system auto-detects the type from the domain, creates the source immediately in the DB with a suggested name, then the agent asks the user for name override, author, and comment (always-ask rule). The source exists even if the user abandons the conversation.
 
 **Source naming convention**: All source names follow the format `prefix-word1-word2` (3 words, slugified). Valid prefixes: `yt-` (youtube), `ig-` (instagram), `fb-` (facebook), `lkn-` (linkedin), `wb-` (web), `bk-` (book), `cr-` (course), `th-` (thought).
 

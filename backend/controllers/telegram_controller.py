@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -40,6 +40,7 @@ from configuration.settings import settings
 router = APIRouter(prefix="/api/telegram", tags=["Telegram"])
 
 _chat_mode_service = ChatModeService()
+_source_create_agent: Optional[SourceCreateAgent] = None
 
 
 async def get_supabase() -> Any:
@@ -253,7 +254,16 @@ def get_chat_agent_service(
 def get_source_create_agent(
     source_service: SourceService = Depends(get_source_service),
 ) -> SourceCreateAgent:
-    return SourceCreateAgent(source_service=source_service)
+    global _source_create_agent
+    if _source_create_agent is None:
+        openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        _source_create_agent = SourceCreateAgent(
+            source_service=source_service,
+            openai_client=openai_client,
+            model=settings.SOURCE_CREATE_MODEL,
+            reasoning_effort=settings.SOURCE_CREATE_REASONING_EFFORT,
+        )
+    return _source_create_agent
 
 
 def get_multi_agent_service(

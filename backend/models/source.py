@@ -47,3 +47,23 @@ class SourceCreateByAgentRequest(BaseModel):
                 f"Got: '{v}'"
             )
         return v
+
+
+class SourceUpdateRequest(BaseModel):
+    """Source update request for the enrich phase (all fields optional)."""
+
+    source_name: Optional[str] = None
+    author: Optional[str] = None
+    comment: Optional[str] = None
+
+    @field_validator("source_name")
+    @classmethod
+    def validate_source_name_prefix(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not any(v.startswith(prefix) for prefix in VALID_PREFIXES):
+            raise ValueError(
+                f"Source name must start with one of: {', '.join(VALID_PREFIXES)}. "
+                f"Got: '{v}'"
+            )
+        return v

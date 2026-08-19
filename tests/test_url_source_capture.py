@@ -207,8 +207,12 @@ class TestSourceCreateAgent:
         reply = await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
         assert "youtube" in reply
         assert "https://youtube.com/watch?v=abc" in reply
-        assert "Suggested name" in reply
+        assert "✅ Source created" in reply  # v2: immediate creation
         assert agent.get_pending_context(1) is not None
+        # v2: source_id should be set in context
+        ctx = agent.get_pending_context(1)
+        assert ctx is not None
+        assert ctx.source_id == "1"
 
     @pytest.mark.anyio
     async def test_start_url_flow_duplicate_url(self) -> None:
@@ -259,12 +263,15 @@ class TestSourceCreateAgent:
 
     @pytest.mark.anyio
     async def test_full_flow_url(self) -> None:
-        """Test the complete URL flow: URL → name → author → comment → create."""
+        """Test the complete URL flow: URL → immediate create → name → author → comment → update."""
         agent = self._make_agent()
 
-        # Step 1: Start URL flow
+        # Step 1: Start URL flow — source created IMMEDIATELY
         reply = await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
-        assert "Suggested name" in reply
+        assert "✅ Source created" in reply  # v2: immediate creation
+        ctx = agent.get_pending_context(1)
+        assert ctx is not None
+        assert ctx.source_id == "1"  # source already exists
 
         # Step 2: Accept suggested name
         reply = await agent.handle_response("yes", user_id=1)
@@ -274,18 +281,22 @@ class TestSourceCreateAgent:
         reply = await agent.handle_response("John Doe", user_id=1)
         assert "comment" in reply.lower()
 
-        # Step 4: Provide comment
+        # Step 4: Provide comment — triggers update
         reply = await agent.handle_response("Great tutorial", user_id=1)
-        assert "created" in reply.lower() or "✅" in reply
+        assert "✅" in reply or "ready" in reply.lower()
 
         # Context should be cleared
         assert agent.get_pending_context(1) is None
+
+        # Verify update_source was called
+        agent._source_service.update_source.assert_awaited_once()
 
     @pytest.mark.anyio
     async def test_always_ask_rule_author(self) -> None:
         """Verify the agent asks for author even though it's optional."""
         agent = self._make_agent()
         await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        # Accept name → should ask for author
         reply = await agent.handle_response("yes", user_id=1)
         # After name step, agent MUST ask for author
         assert "author" in reply.lower()
@@ -295,8 +306,8 @@ class TestSourceCreateAgent:
         """Verify the agent asks for comment even though it's optional."""
         agent = self._make_agent()
         await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
-        await agent.handle_response("yes", user_id=1)
-        reply = await agent.handle_response("skip", user_id=1)
+        await agent.handle_response("yes", user_id=1)  # accept name → asks author
+        reply = await agent.handle_response("skip", user_id=1)  # skip author → asks comment
         # After author step, agent MUST ask for comment
         assert "comment" in reply.lower()
 
@@ -305,10 +316,10 @@ class TestSourceCreateAgent:
         """User can skip optional fields."""
         agent = self._make_agent()
         await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
-        await agent.handle_response("yes", user_id=1)
+        await agent.handle_response("yes", user_id=1)  # accept name
         await agent.handle_response("skip", user_id=1)  # skip author
-        reply = await agent.handle_response("skip", user_id=1)  # skip comment
-        assert "✅" in reply or "created" in reply.lower()
+        reply = await agent.handle_response("skip", user_id=1)  # skip comment → update
+        assert "✅" in reply or "ready" in reply.lower()
 
     @pytest.mark.anyio
     async def test_clear_pending(self) -> None:
@@ -328,10 +339,12 @@ class TestSourceCreateContext:
             source_type="youtube",
             url="https://youtube.com/watch?v=abc",
             suggested_name="yt-cool-video",
+            source_id="abc-123",
             step=SourceCreateStep.AWAITING_AUTHOR,
         )
         d = ctx.to_dict()
         restored = SourceCreateContext.from_dict(d)
         assert restored.source_type == "youtube"
         assert restored.url == "https://youtube.com/watch?v=abc"
+        assert restored.source_id == "abc-123"
         assert restored.step == SourceCreateStep.AWAITING_AUTHOR

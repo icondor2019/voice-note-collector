@@ -102,6 +102,43 @@ class SourcesRepository:
         self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
+    async def update_source(
+        self,
+        source_id: str,
+        source_name: Optional[str] = None,
+        author: Optional[str] = None,
+        comment: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Update a source's mutable fields (name, author, comment).
+
+        Only non-None fields are included in the update payload.
+        Returns the updated record, or None if not found.
+        """
+        payload: dict[str, Any] = {}
+        if source_name is not None:
+            payload["source_name"] = source_name
+        if author is not None:
+            payload["author"] = author
+        if comment is not None:
+            payload["comment"] = comment
+
+        if not payload:
+            # Nothing to update — fetch and return current record
+            return await self.get_source(source_id)
+
+        logger.info(
+            "sources.update",
+            extra={"source_id": source_id, "fields": list(payload.keys())},
+        )
+        response = (
+            await self._client.table(self._table)
+            .update(payload)
+            .eq("id", source_id)
+            .execute()
+        )
+        self._raise_on_error(response, allow_none_response=True)
+        return self._single(response)
+
     async def get_active_source(self) -> Optional[dict[str, Any]]:
         response = (
             await self._client.table(self._table)

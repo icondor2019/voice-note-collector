@@ -75,6 +75,21 @@ class SourceService:
             return await self._repository.activate_source(created["id"]) or created
         return created
 
+    async def update_source(
+        self,
+        source_id: str,
+        source_name: Optional[str] = None,
+        author: Optional[str] = None,
+        comment: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Update a source's mutable fields. Delegates to the repository."""
+        return await self._repository.update_source(
+            source_id=source_id,
+            source_name=source_name,
+            author=author,
+            comment=comment,
+        )
+
     async def activate_source_by_id(self, source_id: str) -> Optional[dict[str, Any]]:
         source = await self._repository.get_source(source_id)
         if not source:

@@ -118,18 +118,25 @@ class MultiAgentService:
         # 1. Hydrate pending_reflection from DB
         pending = await self._hydrate_pending_reflection(telegram_user_id)
 
-        # 2. Build initial state
+        # 2. Hydrate source_create_context from the agent (v2 fix)
+        source_create_ctx = None
+        if self._source_create_agent:
+            ctx = self._source_create_agent.get_pending_context(telegram_user_id)
+            if ctx is not None:
+                source_create_ctx = ctx.to_dict()
+
+        # 3. Build initial state
         state: AgentState = {
             "messages": [HumanMessage(content=user_message)],
             "telegram_user_id": telegram_user_id,
             "mode": self._mode_service.get_mode(),  # type: ignore[typeddict-item]
             "pending_reflection": pending,
-            "source_create_context": None,
+            "source_create_context": source_create_ctx,  # ← WAS always None in v1
             "last_outcome": None,
             "last_reply": None,
         }
 
-        # 3. Invoke
+        # 4. Invoke
         final_state = await self._graph.ainvoke(state)
 
         return MultiAgentResult(
