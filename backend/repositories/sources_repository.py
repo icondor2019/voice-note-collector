@@ -17,14 +17,21 @@ class SourcesRepository:
         author: Optional[str] = None,
         comment: Optional[str] = None,
         status: str = "deactivated",
+        url: Optional[str] = None,
+        type: Optional[str] = None,
     ) -> dict[str, Any]:
         payload = {
             "source_name": source_name,
             "author": author,
             "comment": comment,
             "status": status,
+            "url": url,
+            "type": type,
         }
-        logger.info("sources.create", extra={"source_name": source_name, "status": status})
+        logger.info(
+            "sources.create",
+            extra={"source_name": source_name, "status": status, "type": type},
+        )
         response = await self._client.table(self._table).insert(payload).execute()
         self._raise_on_error(response)
         record = self._single(response)
@@ -55,6 +62,17 @@ class SourcesRepository:
         self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
+    async def get_source_by_url(self, url: str) -> Optional[dict[str, Any]]:
+        response = (
+            await self._client.table(self._table)
+            .select("*")
+            .eq("url", url)
+            .maybe_single()
+            .execute()
+        )
+        self._raise_on_error(response, allow_none_response=True)
+        return self._single(response)
+
     async def list_sources(self, status: Optional[str] = None) -> list[dict[str, Any]]:
         query = self._client.table(self._table).select("*")
         if status:
@@ -78,6 +96,43 @@ class SourcesRepository:
         response = (
             await self._client.table(self._table)
             .update({"status": "active"})
+            .eq("id", source_id)
+            .execute()
+        )
+        self._raise_on_error(response, allow_none_response=True)
+        return self._single(response)
+
+    async def update_source(
+        self,
+        source_id: str,
+        source_name: Optional[str] = None,
+        author: Optional[str] = None,
+        comment: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Update a source's mutable fields (name, author, comment).
+
+        Only non-None fields are included in the update payload.
+        Returns the updated record, or None if not found.
+        """
+        payload: dict[str, Any] = {}
+        if source_name is not None:
+            payload["source_name"] = source_name
+        if author is not None:
+            payload["author"] = author
+        if comment is not None:
+            payload["comment"] = comment
+
+        if not payload:
+            # Nothing to update — fetch and return current record
+            return await self.get_source(source_id)
+
+        logger.info(
+            "sources.update",
+            extra={"source_id": source_id, "fields": list(payload.keys())},
+        )
+        response = (
+            await self._client.table(self._table)
+            .update(payload)
             .eq("id", source_id)
             .execute()
         )

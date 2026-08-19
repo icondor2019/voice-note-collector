@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     SESSION_SYNTHESIS_MODEL: str = "gpt-5.6-luna"
     SESSION_SYNTHESIS_REASONING_EFFORT: str = "medium"
 
+    # Source creation agent
+    SOURCE_CREATE_MODEL: str = "gpt-5.6-luna"
+    SOURCE_CREATE_REASONING_EFFORT: str = "medium"
+
     # Label creation (safety ceiling, not a target — the LLM decides per note)
     MAX_LLM_LABEL_CREATIONS_PER_RUN: int = 10
 

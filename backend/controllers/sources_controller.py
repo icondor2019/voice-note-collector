@@ -24,6 +24,8 @@ class SourceCreateRequest(BaseModel):
     author: Optional[str] = None
     comment: Optional[str] = None
     activate: bool = False
+    url: Optional[str] = None
+    type: Optional[str] = None
 
 
 class ActivateByNameRequest(BaseModel):
@@ -57,6 +59,8 @@ async def create_source(
             author=payload.author,
             comment=payload.comment,
             activate=payload.activate,
+            url=payload.url,
+            type=payload.type,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

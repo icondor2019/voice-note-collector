@@ -50,17 +50,45 @@ class SourceService:
         author: Optional[str] = None,
         comment: Optional[str] = None,
         activate: bool = False,
+        url: Optional[str] = None,
+        type: Optional[str] = None,
     ) -> dict[str, Any]:
+        # Duplicate URL check
+        if url:
+            existing = await self._repository.get_source_by_url(url)
+            if existing:
+                raise ValueError(
+                    f"A source with URL '{url}' already exists: "
+                    f"'{existing.get('source_name', 'unknown')}'"
+                )
+
         created = await self._repository.create_source(
             source_name=source_name,
             author=author,
             comment=comment,
             status="deactivated",
+            url=url,
+            type=type,
         )
         if activate:
             await self._repository.deactivate_all_sources()
             return await self._repository.activate_source(created["id"]) or created
         return created
+
+    async def update_source(
+        self,
+        source_id: str,
+        source_name: Optional[str] = None,
+        author: Optional[str] = None,
+        comment: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Update a source's mutable fields. Delegates to the repository."""
+        return await self._repository.update_source(
+            source_id=source_id,
+            source_name=source_name,
+            author=author,
+            comment=comment,
+        )
 
     async def activate_source_by_id(self, source_id: str) -> Optional[dict[str, Any]]:
         source = await self._repository.get_source(source_id)

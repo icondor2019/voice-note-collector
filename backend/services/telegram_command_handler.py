@@ -26,7 +26,9 @@ from backend.services.session_builder_service import (
     SessionBuilderService,
 )
 from backend.services.source_service import SourceService
+from backend.services.source_create_agent import SourceCreateAgent
 from backend.services.telegram_bot_client import TelegramBotClient
+from backend.services.url_detector_service import UrlDetectorService
 from backend.utils.slug import slugify, validate_slug_input
 
 CREATE_SUCCESS = '✅ Source "{slug}" created and activated.'
@@ -58,9 +60,12 @@ HELP_MESSAGE = (
     "📊 /build_doc stats — preview pending notes without synthesizing\n"
     "❓ /help — show this message\n\n"
     "⚙️ Commands that require arguments:\n\n"
-    "➕ /create <name> — create a new source\n"
+    "➕ /create — create a source (guided flow)\n"
+    "➕ /create <name> — create a source with a name\n"
+    "➕ /create <url> — create a source from a URL\n"
     "🔀 /switch <name> — switch to a source by name\n"
-    "🏷️ /label <name> — add a label"
+    "🏷️ /label <name> — add a label\n\n"
+    "💡 Tip: Send a URL as the entire message to create a source from it."
 )
 
 MODE_DISPLAY_NAMES = {
@@ -79,6 +84,7 @@ class TelegramCommandHandler:
         chat_mode_service: ChatModeService,
         reflection_service: ReflectionService,
         session_builder_service: Optional[SessionBuilderService] = None,
+        source_create_agent: Optional[SourceCreateAgent] = None,
     ) -> None:
         self._source_service = source_service
         self._bot_client = bot_client
@@ -86,6 +92,7 @@ class TelegramCommandHandler:
         self._chat_mode_service = chat_mode_service
         self._reflection_service = reflection_service
         self._session_builder_service = session_builder_service
+        self._source_create_agent = source_create_agent
 
     def _parse_command(self, text: str) -> tuple[str, str]:
         normalized = text.strip()
@@ -98,6 +105,9 @@ class TelegramCommandHandler:
         return command, argument
 
     async def handle_text(self, text: str, chat_id: int | str, from_user_id: int | None = None) -> str:
+        # Store user_id for source creation agent
+        self._current_user_id = from_user_id or 0
+
         command, argument = self._parse_command(text)
         if command == "/create":
             reply = await self._handle_create(argument)
@@ -131,6 +141,15 @@ class TelegramCommandHandler:
         return reply
 
     async def _handle_create(self, argument: str) -> str:
+        # Route to agent flow for all /create variants
+        if self._source_create_agent:
+            # Determine user_id from context (use 0 as fallback for command handler)
+            user_id = getattr(self, "_current_user_id", 0)
+            return await self._source_create_agent.start_create_flow(
+                user_id, name_or_url=argument or None
+            )
+
+        # Fallback: legacy behavior if no agent configured
         if not argument or not validate_slug_input(argument):
             return INVALID_NAME
 
