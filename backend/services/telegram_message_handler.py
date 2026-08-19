@@ -6,6 +6,7 @@ from backend.repositories.repository_errors import DuplicateRecordError
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.multi_agent_service import MultiAgentService
 from backend.services.reflection_service import ReflectionService
+from backend.services.source_create_agent import SourceCreateAgent
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import (
@@ -16,6 +17,7 @@ from backend.services.telegram_command_handler import (
 )
 from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.transcription_service import TranscriptionService
+from backend.services.url_detector_service import UrlDetectorService
 from backend.services.voice_note_service import VoiceNoteService
 from configuration.settings import settings
 
@@ -34,6 +36,7 @@ class TelegramMessageHandler:
         multi_agent_service: MultiAgentService,
         reflection_service: ReflectionService,
         source_service: SourceService,
+        source_create_agent: SourceCreateAgent | None = None,
     ) -> None:
         self._ingestion_service = ingestion_service
         self._voice_note_service = voice_note_service
@@ -44,6 +47,7 @@ class TelegramMessageHandler:
         self._multi_agent_service = multi_agent_service
         self._reflection_service = reflection_service
         self._source_service = source_service
+        self._source_create_agent = source_create_agent
 
     async def _notify(self, chat_id: int | None, text: str) -> None:
         if not settings.TELEGRAM_NOTIFY_ON_TRANSCRIPTION:
@@ -90,6 +94,26 @@ class TelegramMessageHandler:
                     self._chat_mode_service.set_mode("agent")
                 await self._command_handler.handle_text(text, chat_id, from_user_id)
                 return {"outcome": "command", "message_type": "text"}
+
+            # ── URL-only detection (before mode routing) ─────────────
+            if UrlDetectorService.is_url(text):
+                url = UrlDetectorService.extract_url(text)
+                # Auto-switch to agent mode if in note mode
+                if self._chat_mode_service.get_mode() == "note":
+                    self._chat_mode_service.set_mode("agent")
+
+                if self._source_create_agent and from_user_id is not None:
+                    reply = await self._source_create_agent.start_url_flow(
+                        url, from_user_id
+                    )
+                    if chat_id:
+                        await self._bot_client.send_message(chat_id, reply)
+                    return {"outcome": "source_create", "message_type": "text"}
+
+                # Fallback: route to multi-agent if no source_create_agent
+                return await self._route_to_multi_agent(
+                    text, from_user_id, chat_id, "text"
+                )
 
             # Route to MultiAgentService for agent/reflect modes
             if self._chat_mode_service.get_mode() in ("agent", "reflect"):

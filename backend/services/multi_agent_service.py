@@ -16,6 +16,7 @@ from backend.repositories.reflection_repository import ReflectionRepository
 from backend.repositories.sources_repository import SourcesRepository
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.note_selector_service import NoteSelectorService
+from backend.services.source_create_agent import SourceCreateAgent
 from backend.services.telegram_command_handler import REFLECTION_FEEDBACK_TEMPLATE
 
 if TYPE_CHECKING:
@@ -64,6 +65,7 @@ class MultiAgentService:
         note_selector_service: NoteSelectorService,
         memory_repository: ChatMemoryRepository,
         agent_model: ChatOpenAI,
+        source_create_agent: Optional["SourceCreateAgent"] = None,
     ) -> None:
         self._chat_agent = chat_agent
         self._reflection_service = reflection_service
@@ -78,12 +80,14 @@ class MultiAgentService:
         self._note_selector_service = note_selector_service
         self._memory_repository = memory_repository
         self._agent_model = agent_model
+        self._source_create_agent = source_create_agent
 
         # Build flat graph
         graph = StateGraph(AgentState)
         graph.add_node("supervisor", self._supervisor_node)
         graph.add_node("chat_node", self._chat_node)
         graph.add_node("reflect_node", self._reflect_node)
+        graph.add_node("source_create_node", self._source_create_node)
 
         graph.add_edge(START, "supervisor")
         graph.add_conditional_edges(
@@ -92,11 +96,13 @@ class MultiAgentService:
             {
                 "chat_node": "chat_node",
                 "reflect_node": "reflect_node",
+                "source_create_node": "source_create_node",
                 "__end__": END,
             },
         )
         graph.add_edge("chat_node", END)
         graph.add_edge("reflect_node", END)
+        graph.add_edge("source_create_node", END)
 
         self._graph = graph.compile()
 
@@ -118,6 +124,7 @@ class MultiAgentService:
             "telegram_user_id": telegram_user_id,
             "mode": self._mode_service.get_mode(),  # type: ignore[typeddict-item]
             "pending_reflection": pending,
+            "source_create_context": None,
             "last_outcome": None,
             "last_reply": None,
         }
@@ -137,6 +144,9 @@ class MultiAgentService:
     @staticmethod
     def _supervisor_node(state: AgentState) -> dict:
         """Deterministic router — no LLM call."""
+        # Source creation takes priority
+        if state.get("source_create_context") is not None:
+            return {"next": "source_create_node"}
         mode = state.get("mode", "note")
         if mode == "agent":
             return {"next": "chat_node"}
@@ -169,6 +179,34 @@ class MultiAgentService:
             response = "❌ Agent error. Please try again."
 
         return {"last_reply": response, "last_outcome": "chat_reply"}
+
+    # ------------------------------------------------------------------ #
+    #  Source create node
+    # ------------------------------------------------------------------ #
+
+    async def _source_create_node(self, state: AgentState) -> dict:
+        """Handle multi-turn source creation conversation."""
+        if not self._source_create_agent:
+            return {
+                "last_reply": "⚠️ Source creation agent is not configured.",
+                "last_outcome": "error",
+            }
+
+        user_message = ""
+        msgs = state.get("messages", [])
+        if msgs:
+            user_message = str(msgs[-1].content)
+
+        telegram_user_id: int = state.get("telegram_user_id", 0)
+
+        try:
+            response = await self._source_create_agent.handle_response(
+                user_message, telegram_user_id
+            )
+        except Exception:
+            response = "❌ Source creation error. Please try again with /create."
+
+        return {"last_reply": response, "last_outcome": "source_create_reply"}
 
     # ------------------------------------------------------------------ #
     #  Reflect node (flat dispatch via Python if/else)

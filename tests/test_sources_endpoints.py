@@ -42,6 +42,8 @@ class StubSourceService:
         author: Optional[str] = None,
         comment: Optional[str] = None,
         activate: bool = False,
+        url: Optional[str] = None,
+        type: Optional[str] = None,
     ) -> dict[str, Any]:
         if self.raise_on_create:
             raise self.raise_on_create
@@ -50,6 +52,8 @@ class StubSourceService:
             "author": author,
             "comment": comment,
             "activate": activate,
+            "url": url,
+            "type": type,
         }
         return self.create_result
 
@@ -118,6 +122,8 @@ class TestSourcesEndpoints:
             "author": "Alex",
             "comment": "Morning",
             "activate": False,
+            "url": None,
+            "type": None,
         }
 
     def test_create_source_returns_503_on_repository_error(

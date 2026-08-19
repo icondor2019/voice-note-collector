@@ -27,6 +27,7 @@ from backend.services.note_selector_service import NoteSelectorService
 from backend.services.reflection_service import ReflectionService
 from backend.services.session_builder_service import SessionBuilderService
 from backend.services.source_service import SourceService
+from backend.services.source_create_agent import SourceCreateAgent
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import TelegramCommandHandler
 from backend.services.telegram_ingestion_service import TelegramIngestionService
@@ -249,6 +250,12 @@ def get_chat_agent_service(
     return ChatAgentService(memory_repository=memory_repository)
 
 
+def get_source_create_agent(
+    source_service: SourceService = Depends(get_source_service),
+) -> SourceCreateAgent:
+    return SourceCreateAgent(source_service=source_service)
+
+
 def get_multi_agent_service(
     chat_agent: ChatAgentService = Depends(get_chat_agent_service),
     reflection_service: ReflectionService = Depends(get_reflection_service),
@@ -260,6 +267,7 @@ def get_multi_agent_service(
     note_selector_service: NoteSelectorService = Depends(get_note_selector_service),
     memory_repository: ChatMemoryRepository = Depends(get_chat_memory_repository),
     agent_model: ChatOpenAI = Depends(get_agent_model),
+    source_create_agent: SourceCreateAgent = Depends(get_source_create_agent),
 ) -> MultiAgentService:
     return MultiAgentService(
         chat_agent=chat_agent,
@@ -272,6 +280,7 @@ def get_multi_agent_service(
         note_selector_service=note_selector_service,
         memory_repository=memory_repository,
         agent_model=agent_model,
+        source_create_agent=source_create_agent,
     )
 
 
@@ -286,6 +295,7 @@ def get_command_handler(
     chat_mode_service: ChatModeService = Depends(get_chat_mode_service),
     reflection_service: ReflectionService = Depends(get_reflection_service),
     session_builder_service: SessionBuilderService = Depends(get_session_builder_service),
+    source_create_agent: SourceCreateAgent = Depends(get_source_create_agent),
 ) -> TelegramCommandHandler:
     return TelegramCommandHandler(
         source_service=source_service,
@@ -294,6 +304,7 @@ def get_command_handler(
         chat_mode_service=chat_mode_service,
         reflection_service=reflection_service,
         session_builder_service=session_builder_service,
+        source_create_agent=source_create_agent,
     )
 
 
@@ -307,6 +318,7 @@ def get_message_handler(
     multi_agent_service: MultiAgentService = Depends(get_multi_agent_service),
     reflection_service: ReflectionService = Depends(get_reflection_service),
     source_service: SourceService = Depends(get_source_service),
+    source_create_agent: SourceCreateAgent = Depends(get_source_create_agent),
 ) -> TelegramMessageHandler:
     return TelegramMessageHandler(
         ingestion_service=ingestion_service,
@@ -318,6 +330,7 @@ def get_message_handler(
         multi_agent_service=multi_agent_service,
         reflection_service=reflection_service,
         source_service=source_service,
+        source_create_agent=source_create_agent,
     )
 
 

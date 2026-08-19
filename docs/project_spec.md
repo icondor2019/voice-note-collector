@@ -62,7 +62,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 Table schemas are defined in backend/repositories/schema_queries.py
 Main tables:
 - voice_notes
-- sources
+- sources (includes `url` nullable text and `type` nullable text with CHECK constraint: youtube|instagram|facebook|linkedin|web|book|course|thought)
 - labels
 - voice_note_details (includes document_uuid FK to session_documents)
 - voice_note_labels (join table between voice notes and labels; soft-deleted via deleted_at, and records whether the label was applied by the LLM or the user)
@@ -123,7 +123,10 @@ Main tables:
 | NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes |
 | ReflectionService | backend/services/reflection_service.py | Generates reflection questions via LLM, rates user responses (1-10), manages reflection state in Supabase, provides internalization stats via get_reflection_summary() |
 | NoteSelectorService | backend/services/note_selector_service.py | Selects a non-internalized note from a source's recent pool for reflection |
-| MultiAgentService | backend/services/multi_agent_service.py | Unified entry point. Owns a LangGraph `StateGraph` with `supervisor_node` → `chat_node` | `reflect_node`. `handle(user_message, telegram_user_id) -> MultiAgentResult` hydrates `pending_reflection`, invokes the graph, returns the reply + outcome. |
+| MultiAgentService | backend/services/multi_agent_service.py | Unified entry point. Owns a LangGraph `StateGraph` with `supervisor_node` → `chat_node` | `reflect_node` | `source_create_node`. `handle(user_message, telegram_user_id) -> MultiAgentResult` hydrates `pending_reflection`, invokes the graph, returns the reply + outcome. |
+| SourceCreateAgent | backend/services/source_create_agent.py | Multi-turn source creation conversation. Handles URL trigger, `/create` variants. Enforces always-ask rule (must ask for author and comment). Suggests source names from URL structure. |
+| UrlDetectorService | backend/services/url_detector_service.py | Detects URL-only messages (entire message is a URL). Returns False for URL + additional text. |
+| SourceTypeResolver | backend/services/source_type_resolver.py | Maps URL domains to source types (youtube, instagram, facebook, linkedin, web). |
 | QuestionAgent | backend/services/agents/question_agent.py | Generates a reflection question for a single note. Wraps `QUESTION_GENERATION_PROMPT` (moved verbatim from `ReflectionService`). Returns `AgentResult(outcome="asked", reply=question_text, updates={question_type, question_text})`. |
 | ScorerAgent | backend/services/agents/scorer_agent.py | Rates a user's answer 1-10 and produces structured bullet-point feedback. Wraps `RATING_PROMPT` (moved verbatim from `ReflectionService`); rating clamped 1-10. Returns `AgentResult(outcome="scored", reply=feedback, updates={rating})`. |
 | HintAgent | backend/services/agents/hint_agent.py | Socratic, bilingual (English or Spanish — language of the note). New `HINT_PROMPT`. Never reveals the answer. Returns `AgentResult(outcome="hinted", reply=socratic_text)`. |
@@ -145,7 +148,14 @@ Main tables:
 | `/current` | Show the current mode and pending state |
 | `/help` | List all available commands |
 | `/sources` | **Displays an interactive inline keyboard** (one button per source, ✅ marks the active source, pagination at 6 per page with ◀️/▶️ navigation). Tapping a source activates it and edits the message in place. `/switch <name>` is unchanged. |
+| `/create` | Start guided source creation flow (agent asks for type, name, author, comment) |
+| `/create <name>` | Create a source with a given name (must have type prefix, e.g. `yt-my-video`) |
+| `/create <url>` | Create a source from a URL (auto-detects type, suggests name) |
 | `/switch <name>` / `/default` / other source commands | Source management (unchanged) |
+
+**URL-only trigger**: Sending a message that is entirely a URL (no additional text) automatically triggers source creation. The system auto-detects the type from the domain, suggests a name, and the agent asks for author and comment (always-ask rule).
+
+**Source naming convention**: All source names follow the format `prefix-word1-word2` (3 words, slugified). Valid prefixes: `yt-` (youtube), `ig-` (instagram), `fb-` (facebook), `lkn-` (linkedin), `wb-` (web), `bk-` (book), `cr-` (course), `th-` (thought).
 
 **Slash-cancels-reflect rule**: any slash command sent while in `reflect` mode cancels the pending reflection and switches the mode back to `agent`. No dedicated `/reflect cancel` is needed.
 

@@ -28,6 +28,18 @@ class ReflectionContext(TypedDict, total=False):
     context_shown: bool
 
 
+class SourceCreateContext(TypedDict, total=False):
+    """Tracks pending source creation state in AgentState."""
+
+    source_type: str
+    url: Optional[str]
+    suggested_name: Optional[str]
+    source_name: Optional[str]
+    author: Optional[str]
+    comment: Optional[str]
+    step: str
+
+
 class AgentState(TypedDict, total=False):
     """Shared state for the supervisor and sub-graphs."""
 
@@ -35,6 +47,7 @@ class AgentState(TypedDict, total=False):
     telegram_user_id: int
     mode: Literal["note", "agent", "reflect"]
     pending_reflection: Optional[ReflectionContext]
+    source_create_context: Optional[SourceCreateContext]
     last_outcome: Optional[str]
     last_reply: Optional[str]
 

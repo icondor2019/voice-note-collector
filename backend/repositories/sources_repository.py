@@ -17,14 +17,21 @@ class SourcesRepository:
         author: Optional[str] = None,
         comment: Optional[str] = None,
         status: str = "deactivated",
+        url: Optional[str] = None,
+        type: Optional[str] = None,
     ) -> dict[str, Any]:
         payload = {
             "source_name": source_name,
             "author": author,
             "comment": comment,
             "status": status,
+            "url": url,
+            "type": type,
         }
-        logger.info("sources.create", extra={"source_name": source_name, "status": status})
+        logger.info(
+            "sources.create",
+            extra={"source_name": source_name, "status": status, "type": type},
+        )
         response = await self._client.table(self._table).insert(payload).execute()
         self._raise_on_error(response)
         record = self._single(response)
@@ -49,6 +56,17 @@ class SourcesRepository:
             await self._client.table(self._table)
             .select("*")
             .eq("source_name", source_name)
+            .maybe_single()
+            .execute()
+        )
+        self._raise_on_error(response, allow_none_response=True)
+        return self._single(response)
+
+    async def get_source_by_url(self, url: str) -> Optional[dict[str, Any]]:
+        response = (
+            await self._client.table(self._table)
+            .select("*")
+            .eq("url", url)
             .maybe_single()
             .execute()
         )
