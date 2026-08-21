@@ -81,13 +81,19 @@ class SourceService:
         source_name: Optional[str] = None,
         author: Optional[str] = None,
         comment: Optional[str] = None,
+        type: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Update a source's mutable fields. Delegates to the repository."""
+        """Update a source's mutable fields. Delegates to the repository.
+
+        When type is provided and source_name is not, the name prefix is
+        re-derived from the new type's prefix map.
+        """
         return await self._repository.update_source(
             source_id=source_id,
             source_name=source_name,
             author=author,
             comment=comment,
+            type=type,
         )
 
     async def activate_source_by_id(self, source_id: str) -> Optional[dict[str, Any]]:

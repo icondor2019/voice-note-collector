@@ -62,7 +62,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 Table schemas are defined in backend/repositories/schema_queries.py
 Main tables:
 - voice_notes
-- sources (includes `url` nullable text and `type` nullable text with CHECK constraint: youtube|instagram|facebook|linkedin|web|book|course|thought)
+- sources (includes `url` nullable text and `type` nullable text with CHECK constraint: youtube|instagram|facebook|linkedin|web|book|course|thought|test|other)
 - labels
 - voice_note_details (includes document_uuid FK to session_documents)
 - voice_note_labels (join table between voice notes and labels; soft-deleted via deleted_at, and records whether the label was applied by the LLM or the user)
@@ -124,7 +124,7 @@ Main tables:
 | ReflectionService | backend/services/reflection_service.py | Generates reflection questions via LLM, rates user responses (1-10), manages reflection state in Supabase, provides internalization stats via get_reflection_summary() |
 | NoteSelectorService | backend/services/note_selector_service.py | Selects a non-internalized note from a source's recent pool for reflection |
 | MultiAgentService | backend/services/multi_agent_service.py | Unified entry point. Owns a LangGraph `StateGraph` with `supervisor_node` → `chat_node` | `reflect_node` | `source_create_node`. `handle(user_message, telegram_user_id) -> MultiAgentResult` hydrates `pending_reflection` AND `source_create_context` (from `SourceCreateAgent.get_pending_context()`), invokes the graph, returns the reply + outcome. The supervisor routes to `source_create_node` when a pending source creation context exists. |
-| SourceCreateAgent | backend/services/source_create_agent.py | LLM-driven (gpt-5.6-luna, reasoning_effort=medium) multi-turn source creation. **Create-immediately-then-enrich**: URL detection creates the source immediately in DB, then the agent enriches it (name override, author, comment) via `update_source()`. Uses detailed system prompt with naming examples. Handles `/create` variants. Enforces always-ask rule (must ask for author and comment). |
+| SourceCreateAgent | backend/services/source_create_agent.py | LLM-driven (gpt-5.6-luna, reasoning_effort=medium) multi-turn source creation and enrichment. **Two decoupled concerns**: (1) `create_source_from_url()` — deterministic URL creation (no LLM, no pending context), resolves type, generates default name, creates and activates source. (2) `start_enrich_flow()` — source-agnostic enrichment initiation for ANY active source (sets pending context for LLM conversation). Handles `/create` variants (guided flow, name-based). Enforces always-ask rule (must ask for author and comment). **Confirmation flow**: after collecting all fields, shows a summary of exact proposed changes (including empty fields) and waits for explicit confirmation before persisting. Affirmative responses apply; corrections revise the summary; ambiguous `no` triggers clarification. On apply: persists all staged fields, clears ephemeral pending context, sends final summary with "We are now in note mode." `start_url_flow()` has been deleted. Supports `test` (prefix `ts-`) and `other` (prefix `ot-`) source types. Invalid type synonyms are explained and mapped to canonical types after user confirmation. |
 | UrlDetectorService | backend/services/url_detector_service.py | Detects URL-only messages (entire message is a URL). Returns False for URL + additional text. |
 | SourceTypeResolver | backend/services/source_type_resolver.py | Maps URL domains to source types (youtube, instagram, facebook, linkedin, web). |
 | QuestionAgent | backend/services/agents/question_agent.py | Generates a reflection question for a single note. Wraps `QUESTION_GENERATION_PROMPT` (moved verbatim from `ReflectionService`). Returns `AgentResult(outcome="asked", reply=question_text, updates={question_type, question_text})`. |
@@ -150,12 +150,13 @@ Main tables:
 | `/sources` | **Displays an interactive inline keyboard** (one button per source, ✅ marks the active source, pagination at 6 per page with ◀️/▶️ navigation). Tapping a source activates it and edits the message in place. `/switch <name>` is unchanged. |
 | `/create` | Start guided source creation flow (agent asks for type, name, author, comment) |
 | `/create <name>` | Create a source with a given name (must have type prefix, e.g. `yt-my-video`) |
-| `/create <url>` | Create a source from a URL (auto-detects type, suggests name) |
+| `/create <url>` | Create a source from a URL (deterministic: auto-detects type, generates default name, no LLM) |
+| `/update` | Enrich the active source's metadata (name, author, comment) via LLM conversation. Works on any active source regardless of how it was created. |
 | `/switch <name>` / `/default` / other source commands | Source management (unchanged) |
 
-**URL-only trigger**: Sending a message that is entirely a URL (no additional text) automatically triggers **create-immediately-then-enrich**: the system auto-detects the type from the domain, creates the source immediately in the DB with a suggested name, then the agent asks the user for name override, author, and comment (always-ask rule). The source exists even if the user abandons the conversation.
+**URL-only trigger**: Sending a message that is entirely a URL (no additional text) triggers **deterministic creation**: the system auto-detects the type from the domain, generates a default name, creates the source immediately in the DB, and returns a confirmation. **No LLM call. No enrichment. No follow-up questions.** To enrich the source afterwards, the user sends `/update`.
 
-**Source naming convention**: All source names follow the format `prefix-word1-word2` (3 words, slugified). Valid prefixes: `yt-` (youtube), `ig-` (instagram), `fb-` (facebook), `lkn-` (linkedin), `wb-` (web), `bk-` (book), `cr-` (course), `th-` (thought).
+**Source naming convention**: All source names follow the format `prefix-word1-word2` (3 words, slugified). Valid prefixes: `yt-` (youtube), `ig-` (instagram), `fb-` (facebook), `lkn-` (linkedin), `wb-` (web), `bk-` (book), `cr-` (course), `th-` (thought), `ts-` (test), `ot-` (other).
 
 **Slash-cancels-reflect rule**: any slash command sent while in `reflect` mode cancels the pending reflection and switches the mode back to `agent`. No dedicated `/reflect cancel` is needed.
 

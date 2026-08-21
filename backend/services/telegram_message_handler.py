@@ -98,12 +98,9 @@ class TelegramMessageHandler:
             # ── URL-only detection (before mode routing) ─────────────
             if UrlDetectorService.is_url(text):
                 url = UrlDetectorService.extract_url(text)
-                # Auto-switch to agent mode if in note mode
-                if self._chat_mode_service.get_mode() == "note":
-                    self._chat_mode_service.set_mode("agent")
 
                 if self._source_create_agent and from_user_id is not None:
-                    reply = await self._source_create_agent.start_url_flow(
+                    reply = await self._source_create_agent.create_source_from_url(
                         url, from_user_id
                     )
                     if chat_id:
@@ -115,8 +112,8 @@ class TelegramMessageHandler:
                     text, from_user_id, chat_id, "text"
                 )
 
-            # Route to MultiAgentService for agent/reflect modes
-            if self._chat_mode_service.get_mode() in ("agent", "reflect"):
+            # Route to MultiAgentService for agent/reflect modes OR pending enrichment
+            if self._chat_mode_service.get_mode() in ("agent", "reflect") or self._has_pending_source_create_context(from_user_id):
                 return await self._route_to_multi_agent(
                     text, from_user_id, chat_id, "text"
                 )
@@ -149,8 +146,8 @@ class TelegramMessageHandler:
                 )
                 raise
 
-            # Route to MultiAgentService for agent/reflect modes
-            if self._chat_mode_service.get_mode() in ("agent", "reflect"):
+            # Route to MultiAgentService for agent/reflect modes OR pending enrichment
+            if self._chat_mode_service.get_mode() in ("agent", "reflect") or self._has_pending_source_create_context(from_user_id):
                 return await self._route_to_multi_agent(
                     raw_text, from_user_id, chat_id, message_type
                 )
@@ -219,6 +216,9 @@ class TelegramMessageHandler:
         chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
         message_id = callback_query.get("message", {}).get("message_id")
 
+        # Store user_id for source switch context invalidation
+        self._current_callback_user_id = from_user_id
+
         if callback_data.startswith("src:"):
             source_id = callback_data[4:]
             return await self._handle_source_switch_callback(
@@ -253,6 +253,14 @@ class TelegramMessageHandler:
                 show_alert=True,
             )
             return {"outcome": "error", "reason": "stale_source"}
+
+        # Invalidate any stale pending update context for this user
+        from_user_id = None
+        # Extract user_id from callback_query context (set by caller)
+        if hasattr(self, "_current_callback_user_id"):
+            from_user_id = self._current_callback_user_id
+        if from_user_id is not None and self._source_create_agent:
+            self._source_create_agent.clear_pending(from_user_id)
 
         sources = await self._source_service.list_sources()
         target_page = 0
@@ -294,6 +302,14 @@ class TelegramMessageHandler:
     # ------------------------------------------------------------------ #
     #  Helpers
     # ------------------------------------------------------------------ #
+
+    def _has_pending_source_create_context(self, user_id: int | None) -> bool:
+        """Check if the user has a pending source-create/update enrichment context."""
+        if user_id is None:
+            return False
+        if not self._source_create_agent:
+            return False
+        return self._source_create_agent.get_pending_context(user_id) is not None
 
     async def _route_to_multi_agent(
         self,

@@ -108,8 +108,9 @@ class SourcesRepository:
         source_name: Optional[str] = None,
         author: Optional[str] = None,
         comment: Optional[str] = None,
+        type: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Update a source's mutable fields (name, author, comment).
+        """Update a source's mutable fields (name, author, comment, type).
 
         Only non-None fields are included in the update payload.
         Returns the updated record, or None if not found.
@@ -121,6 +122,8 @@ class SourcesRepository:
             payload["author"] = author
         if comment is not None:
             payload["comment"] = comment
+        if type is not None:
+            payload["type"] = type
 
         if not payload:
             # Nothing to update — fetch and return current record

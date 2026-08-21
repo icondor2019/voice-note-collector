@@ -15,9 +15,11 @@ VALID_SOURCE_TYPES = {
     "book",
     "course",
     "thought",
+    "test",
+    "other",
 }
 
-VALID_PREFIXES = ("yt-", "ig-", "fb-", "lkn-", "wb-", "bk-", "cr-", "th-")
+VALID_PREFIXES = ("yt-", "ig-", "fb-", "lkn-", "wb-", "bk-", "cr-", "th-", "ts-", "ot-")
 
 
 class SourceCreateByAgentRequest(BaseModel):
@@ -53,6 +55,7 @@ class SourceUpdateRequest(BaseModel):
     """Source update request for the enrich phase (all fields optional)."""
 
     source_name: Optional[str] = None
+    type: Optional[str] = None
     author: Optional[str] = None
     comment: Optional[str] = None
 
@@ -65,5 +68,16 @@ class SourceUpdateRequest(BaseModel):
             raise ValueError(
                 f"Source name must start with one of: {', '.join(VALID_PREFIXES)}. "
                 f"Got: '{v}'"
+            )
+        return v
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if v not in VALID_SOURCE_TYPES:
+            raise ValueError(
+                f"Invalid source type '{v}'. Must be one of: {', '.join(sorted(VALID_SOURCE_TYPES))}"
             )
         return v

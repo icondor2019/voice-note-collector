@@ -92,7 +92,7 @@ def _build_message_handler(
 
 @pytest.mark.anyio
 async def test_url_only_in_note_mode_triggers_source_creation() -> None:
-    """URL-only message in note mode auto-switches to agent mode and triggers source creation."""
+    """URL-only message in note mode triggers deterministic source creation (no mode switch)."""
     event = _build_event(message_type="text")
     chat_mode_service = ChatModeService()
     chat_mode_service.set_mode("note")
@@ -108,7 +108,8 @@ async def test_url_only_in_note_mode_triggers_source_creation() -> None:
     result = await handler.handle(update)
 
     assert result == {"outcome": "source_create", "message_type": "text"}
-    assert chat_mode_service.get_mode() == "agent"  # auto-switched
+    # No auto-switch to agent mode anymore
+    assert chat_mode_service.get_mode() == "note"
     handler._bot_client.send_message.assert_awaited_once()
     sent_text = handler._bot_client.send_message.call_args[0][1]
     assert "youtube" in sent_text
@@ -177,8 +178,8 @@ async def test_url_only_in_note_mode_without_agent_routes_to_multi_agent() -> No
 
     result = await handler.handle(update)
 
-    # Auto-switched to agent mode, then routed to multi-agent
-    assert chat_mode_service.get_mode() == "agent"
+    # No auto-switch to agent mode; routed to multi-agent
+    assert chat_mode_service.get_mode() == "note"
     assert result == {"outcome": "agent_response", "message_type": "text"}
 
 
@@ -209,8 +210,8 @@ async def test_create_no_args_routes_to_agent() -> None:
 
 
 @pytest.mark.anyio
-async def test_create_with_url_routes_to_url_flow() -> None:
-    """/create <url> treats the URL as a URL trigger."""
+async def test_create_with_url_routes_to_deterministic_creation() -> None:
+    """/create <url> creates source deterministically (no LLM, no enrichment)."""
     source_service = AsyncMock()
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
@@ -230,7 +231,9 @@ async def test_create_with_url_routes_to_url_flow() -> None:
     )
 
     assert "youtube" in reply
-    assert source_create_agent.get_pending_context(456) is not None
+    assert "✅ Source created" in reply
+    # No pending context after deterministic creation
+    assert source_create_agent.get_pending_context(456) is None
 
 
 @pytest.mark.anyio

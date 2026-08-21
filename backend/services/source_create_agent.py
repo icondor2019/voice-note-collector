@@ -30,6 +30,8 @@ _TYPE_PREFIX_MAP: dict[str, str] = {
     "book": "bk",
     "course": "cr",
     "thought": "th",
+    "test": "ts",
+    "other": "ot",
 }
 
 # --------------------------------------------------------------------------- #
@@ -65,6 +67,14 @@ Every source name MUST follow this format:
 | bk-    | book      | Books                            |
 | cr-    | course    | Online courses                   |
 | th-    | thought   | Personal thoughts and ideas      |
+| ts-    | test      | Test sources, experiments        |
+| ot-    | other     | Anything that doesn't fit        |
+
+### Invalid Type Handling (CRITICAL)
+If the user provides an invalid type synonym like 'lesson', 'article', 'podcast', etc.,
+do NOT silently map it. Instead, say:
+"I don't recognize '{invalid_type}'. Did you mean one of these? → {suggest 2-3 closest canonical types}"
+Only proceed after the user confirms a canonical type. Never write an invalid type to the database.
 
 ### Name Suggestion Examples
 
@@ -119,30 +129,58 @@ If the user says "skip", "none", "no", or "n/a", accept it and move on.
 3. If the user provides a new name: validate it has a valid prefix, update the source.
 4. Ask: "👤 Who is the author? (or say 'skip')"
 5. Ask: "💬 Any comment about this source? (or say 'skip')"
-6. Update the source with author/comment if provided.
-7. Confirm: "✅ Source {name} is ready! Author: {author}. Comment: {comment}."
+6. After collecting name, author, and comment, DO NOT apply changes immediately.
+   Show a confirmation summary (see Confirmation Flow below).
 
 ## Conversation Flow (/create — no URL)
 1. Ask: "What type of source? (youtube, instagram, facebook, linkedin, web, book,
-   course, thought) — or paste a URL."
+   course, thought, test, other) — or paste a URL."
 2. Once you know the type, suggest a name and ask if the user wants to keep it.
 3. Ask for author (always).
 4. Ask for comment (always).
-5. Create the source, activate it, confirm.
+5. After collecting all fields, show a confirmation summary (see Confirmation Flow below).
+
+## Confirmation Flow (CRITICAL — replaces auto-apply)
+After collecting name, author, and comment, do NOT apply changes immediately.
+Instead, show a summary of ALL fields (including empty ones) and ask:
+"Anything else to add, or shall I apply these changes?"
+
+Example summary:
+"Here's what I'll update:
+📝 Name: yt-scaling-apis
+📎 Type: youtube
+🔗 URL: https://youtube.com/watch?v=abc
+👤 Author: John Doe
+💬 Comment: (empty)
+
+Anything else to add, or shall I apply these changes?"
+
+Apply ONLY on:
+- Clear affirmative: 'confirm', 'correct', 'go ahead', 'yes', 'apply', 'that's all', 'looks good'
+- 'no, that's all' or 'no, apply' as answer to the "anything else?" prompt
+
+If the user provides a correction or additional information (e.g., "author: Jane",
+"actually the type is course"), update the field(s), rebuild the summary, and re-ask.
+
+If the user says a bare ambiguous 'no' without context, ask for clarification:
+"Just to confirm — do you mean 'no, that's all, apply' or 'no, I want to change something'?"
+
+On apply, say: "We are now in note mode." Do NOT mention what the next audio will do.
 
 ## Output Format
-When you have collected all information and need to update/create the source,
-respond with a JSON block so the system can parse it:
+When you have collected all information and the user has confirmed, respond with a
+JSON block so the system can parse it:
 ```json
 {
   "action": "update_source",
   "source_name": "yt-fin-aprendizaje",
+  "type": "youtube",
   "author": "Javier Maza",
   "comment": "Entrevista sobre el fin del aprendizaje"
 }
 ```
 If the user is just answering a question mid-conversation, respond naturally in
-text — do NOT output JSON until you have all the information.
+text — do NOT output JSON until you have all the information and the user has confirmed.
 """
 
 
@@ -152,6 +190,7 @@ class SourceCreateStep(str, Enum):
     AWAITING_NAME_CONFIRM = "awaiting_name_confirm"
     AWAITING_AUTHOR = "awaiting_author"
     AWAITING_COMMENT = "awaiting_comment"
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
     COMPLETE = "complete"
     # For /create flows (no URL)
     AWAITING_TYPE = "awaiting_type"
@@ -170,6 +209,7 @@ class SourceCreateContext:
         source_id: Optional[str] = None,
         author: Optional[str] = None,
         comment: Optional[str] = None,
+        type: Optional[str] = None,
         step: SourceCreateStep = SourceCreateStep.AWAITING_NAME_CONFIRM,
         conversation_history: Optional[list[dict[str, str]]] = None,
     ) -> None:
@@ -180,6 +220,7 @@ class SourceCreateContext:
         self.source_id = source_id
         self.author = author
         self.comment = comment
+        self.type = type
         self.step = step
         self.conversation_history: list[dict[str, str]] = conversation_history or []
 
@@ -192,6 +233,7 @@ class SourceCreateContext:
             "source_id": self.source_id,
             "author": self.author,
             "comment": self.comment,
+            "type": self.type,
             "step": self.step.value,
             "conversation_history": self.conversation_history,
         }
@@ -206,6 +248,7 @@ class SourceCreateContext:
             source_id=data.get("source_id"),
             author=data.get("author"),
             comment=data.get("comment"),
+            type=data.get("type"),
             step=SourceCreateStep(data.get("step", "awaiting_name_confirm")),
             conversation_history=data.get("conversation_history", []),
         )
@@ -338,13 +381,15 @@ class SourceCreateAgent:
             return ""
 
     # ------------------------------------------------------------------ #
-    #  URL flow — create immediately, then enrich
+    #  Deterministic URL creation (no LLM, no pending context)
     # ------------------------------------------------------------------ #
 
-    async def start_url_flow(self, url: str, user_id: int) -> str:
-        """Start the source creation flow triggered by a URL-only message.
+    async def create_source_from_url(self, url: str, user_id: int) -> str:
+        """Create a source deterministically from a URL.
 
-        v2: Creates the source IMMEDIATELY, then asks for enrichment.
+        No LLM call. No pending enrichment context. No follow-up questions.
+        Resolves type, generates default name, creates and activates source,
+        returns confirmation.
         """
         source_type = SourceTypeResolver.resolve_type(url)
         suggested_name = _suggest_source_name(source_type, url)
@@ -368,7 +413,7 @@ class SourceCreateAgent:
             )
             source_id = source.get("id")
             logger.info(
-                "source_create_agent.immediate_create",
+                "source_create_agent.deterministic_create",
                 extra={
                     "source_id": source_id,
                     "source_name": suggested_name,
@@ -380,36 +425,71 @@ class SourceCreateAgent:
             return f"❌ {exc}"
         except Exception as exc:
             logger.error(
-                "source_create_agent.immediate_create_failed",
+                "source_create_agent.deterministic_create_failed",
                 extra={"error": str(exc)},
             )
             return "❌ Failed to create source. Please try again with /create."
 
-        # Set pending context with source_id for the enrich phase
+        return (
+            f"✅ Source created: {suggested_name} ({source_type}).\n"
+            f"🔗 {url}\n\n"
+            f"Use /update to enrich this source (name, author, comment)."
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Enrichment flow for any existing active source
+    # ------------------------------------------------------------------ #
+
+    async def start_enrich_flow(self, user_id: int, source: dict) -> str:
+        """Start enrichment conversation for ANY existing active source.
+
+        Source-agnostic: works regardless of how the source was created
+        (URL, /create, /switch, inline keyboard). Clears any existing
+        pending context before starting.
+        """
+        source_id = source.get("id")
+        source_name = source.get("source_name", "unknown")
+        source_type = source.get("type", "web")
+        url = source.get("url")
+        author = source.get("author")
+        comment = source.get("comment")
+
+        # Clear any existing pending context to prevent state corruption
+        self.clear_pending(user_id)
+
+        suggested_name = source_name
+        if not suggested_name or suggested_name == "unknown":
+            suggested_name = _suggest_source_name(source_type, url)
+
         ctx = SourceCreateContext(
             source_type=source_type,
             url=url,
             suggested_name=suggested_name,
-            source_name=suggested_name,
+            source_name=source_name,
             source_id=source_id,
+            author=author,
+            comment=comment,
+            type=source_type,
             step=SourceCreateStep.AWAITING_NAME_CONFIRM,
         )
-        # Seed conversation history with the system context
+        # Seed conversation history with the source's CURRENT state
         ctx.conversation_history.append(
             {
                 "role": "system",
                 "content": (
-                    f"The source was just created with: name={suggested_name}, "
-                    f"type={source_type}, url={url}, source_id={source_id}. "
-                    f"Now enrich it by asking the user for name override, author, and comment."
+                    f"The active source has: name={source_name}, "
+                    f"type={source_type}, url={url or 'N/A'}, source_id={source_id}, "
+                    f"author={author or 'not set'}, comment={comment or 'not set'}. "
+                    f"Enrich it by asking the user for name override, author, and comment. "
+                    f"After collecting all fields, show a confirmation summary and wait "
+                    f"for explicit confirmation before applying."
                 ),
             }
         )
         self._pending[user_id] = ctx
 
         return (
-            f"✅ Source created: {suggested_name} ({source_type}).\n"
-            f"🔗 {url}\n\n"
+            f"📂 Active source: {source_name} ({source_type}).\n\n"
             f"I suggested the name above. Would you like to keep it or change it?"
         )
 
@@ -421,10 +501,10 @@ class SourceCreateAgent:
         self, user_id: int, name_or_url: Optional[str] = None
     ) -> str:
         """Start the source creation flow triggered by /create command."""
-        # If argument is a URL, treat as URL trigger
+        # If argument is a URL, treat as deterministic URL creation
         if name_or_url and UrlDetectorService.is_url(name_or_url):
             url = UrlDetectorService.extract_url(name_or_url)
-            return await self.start_url_flow(url, user_id)
+            return await self.create_source_from_url(url, user_id)
 
         # If argument is a name, validate and pre-fill
         if name_or_url:
@@ -470,7 +550,7 @@ class SourceCreateAgent:
     # ------------------------------------------------------------------ #
 
     async def handle_response(self, user_message: str, user_id: int) -> str:
-        """Process the user's response in the source creation conversation.
+        """Process the user's responses in the source creation conversation.
 
         v2: Uses LLM to drive the conversation. Parses JSON output for
         update_source actions.
@@ -484,6 +564,10 @@ class SourceCreateAgent:
         # For /create flows without URL, handle the state machine steps first
         if ctx.step == SourceCreateStep.AWAITING_TYPE:
             return await self._handle_type_step(text, user_id, ctx)
+
+        # Confirmation step: handle locally (no LLM call) to avoid ambiguity
+        if ctx.step == SourceCreateStep.AWAITING_CONFIRMATION:
+            return await self._handle_confirmation_step(text, user_id, ctx)
 
         # For URL-triggered flow or /create with name: use LLM-driven conversation
         # Add user message to conversation history
@@ -528,9 +612,9 @@ class SourceCreateAgent:
         # Check if user pasted a URL instead of selecting a type
         if UrlDetectorService.is_url(text):
             url = UrlDetectorService.extract_url(text)
-            # Delegate to URL flow
+            # Delegate to deterministic URL creation
             self.clear_pending(user_id)
-            return await self.start_url_flow(url, user_id)
+            return await self.create_source_from_url(url, user_id)
 
         if text.lower() in VALID_SOURCE_TYPES:
             ctx.source_type = text.lower()
@@ -559,14 +643,15 @@ class SourceCreateAgent:
     async def _handle_update_action(
         self, action: dict[str, Any], user_id: int, ctx: SourceCreateContext
     ) -> str:
-        """Handle the LLM's JSON output to update the source."""
-        source_id = ctx.source_id
-        if not source_id:
-            return "❌ No source to update. Use /create to start."
+        """Handle the LLM's JSON output to update the source.
 
+        Instead of applying immediately, extract fields into context and
+        transition to AWAITING_CONFIRMATION to show a summary first.
+        """
         new_name = action.get("source_name")
         new_author = action.get("author")
         new_comment = action.get("comment")
+        new_type = action.get("type")
 
         # Validate name prefix if provided
         if new_name:
@@ -578,23 +663,195 @@ class SourceCreateAgent:
                     f"Try again."
                 )
 
+        # Validate type if provided
+        if new_type and new_type not in VALID_SOURCE_TYPES:
+            return (
+                f"❌ Invalid source type '{new_type}'.\n"
+                f"Must be one of: {', '.join(sorted(VALID_SOURCE_TYPES))}"
+            )
+
+        # Update context with proposed values (don't apply yet)
+        if new_name is not None:
+            ctx.source_name = new_name
+        if new_author is not None:
+            ctx.author = new_author
+        if new_comment is not None:
+            ctx.comment = new_comment
+        if new_type is not None:
+            ctx.type = new_type
+
+        # Transition to confirmation step
+        ctx.step = SourceCreateStep.AWAITING_CONFIRMATION
+        return self._build_confirmation_summary(ctx)
+
+    def _build_confirmation_summary(self, ctx: SourceCreateContext) -> str:
+        """Build a confirmation summary showing all proposed changes.
+
+        Shows all fields including empty ones with '(empty)' placeholder.
+        Ends with a prompt asking if anything else should be added.
+        """
+        name = ctx.source_name or ctx.suggested_name or "(empty)"
+        source_type = ctx.type or ctx.source_type or "(empty)"
+        url = ctx.url or "(empty)"
+        author = ctx.author or "(empty)"
+        comment = ctx.comment or "(empty)"
+
+        return (
+            f"Here's what I'll update:\n"
+            f"📝 Name: {name}\n"
+            f"📎 Type: {source_type}\n"
+            f"🔗 URL: {url}\n"
+            f"👤 Author: {author}\n"
+            f"💬 Comment: {comment}\n\n"
+            f"Anything else to add, or shall I apply these changes?"
+        )
+
+    async def _handle_confirmation_step(
+        self, text: str, user_id: int, ctx: SourceCreateContext
+    ) -> str:
+        """Handle the user's response during the confirmation step.
+
+        Detects:
+        - Clear affirmative → apply changes
+        - 'no, that's all' → apply changes
+        - Correction/addition → update field, rebuild summary, re-ask
+        - Ambiguous 'no' → ask for clarification
+        """
+        text_lower = text.lower().strip()
+
+        # Clear affirmative responses
+        affirmative = {
+            "confirm", "correct", "go ahead", "yes", "apply", "that's all",
+            "looks good", "ok", "sure", "yep", "y", "please do", "do it",
+            "apply it", "apply changes", "save", "save it",
+        }
+        if text_lower in affirmative:
+            return await self._apply_enrichment(user_id, ctx)
+
+        # "no, that's all" variants — clear answer to "anything else?"
+        no_thats_all = {
+            "no, that's all", "no that's all", "no, thats all", "no thats all",
+            "no, apply", "no apply", "nothing else", "nope, that's all",
+            "nope, apply", "no, go ahead", "no, go ahead and apply",
+        }
+        if text_lower in no_thats_all:
+            return await self._apply_enrichment(user_id, ctx)
+
+        # Check for corrections/additions (e.g., "author: Jane", "the type is course")
+        correction = self._extract_correction(text, ctx)
+        if correction:
+            return self._build_confirmation_summary(ctx)
+
+        # Ambiguous bare "no" — ask for clarification
+        if text_lower in ("no", "nope", "nah"):
+            return (
+                "Just to confirm — do you mean 'no, that's all, apply' "
+                "or 'no, I want to change something'?"
+            )
+
+        # Anything else — treat as potential correction or additional info
+        # Try to extract field updates from the text
+        correction = self._extract_correction(text, ctx)
+        if correction:
+            return self._build_confirmation_summary(ctx)
+
+        # If we can't parse it, ask for clarification
+        return (
+            "I'm not sure if you want to apply the changes or modify something. "
+            "Say 'apply' to save, or tell me what you'd like to change."
+        )
+
+    def _extract_correction(self, text: str, ctx: SourceCreateContext) -> bool:
+        """Try to extract field corrections from user text.
+
+        Returns True if a correction was found and applied to ctx.
+        """
+        import re
+
+        # Pattern: "field: value" or "field is value"
+        # Use original text for value extraction (preserve case)
+        # author: Jane
+        author_match = re.search(r"(?:author|written by|by)\s*[:=]\s*(.+)", text, re.IGNORECASE)
+        if author_match:
+            ctx.author = author_match.group(1).strip()
+            return True
+
+        # comment: some comment
+        comment_match = re.search(r"(?:comment|note|description)\s*[:=]\s*(.+)", text, re.IGNORECASE)
+        if comment_match:
+            ctx.comment = comment_match.group(1).strip()
+            return True
+
+        # type: course
+        type_match = re.search(r"(?:type|category)\s*[:=]\s*(.+)", text, re.IGNORECASE)
+        if type_match:
+            new_type = type_match.group(1).strip().lower()
+            if new_type in VALID_SOURCE_TYPES:
+                ctx.type = new_type
+                # Re-derive name prefix if name exists
+                if ctx.source_name:
+                    prefix = _TYPE_PREFIX_MAP.get(new_type, "wb")
+                    # Replace existing prefix
+                    for old_prefix in VALID_PREFIXES:
+                        if ctx.source_name.startswith(old_prefix):
+                            ctx.source_name = f"{prefix}-{ctx.source_name[len(old_prefix):]}"
+                            break
+                return True
+
+        # name: new-name
+        name_match = re.search(r"(?:name|rename)\s*[:=]\s*(.+)", text, re.IGNORECASE)
+        if name_match:
+            new_name = name_match.group(1).strip()
+            slug = slugify(new_name)
+            has_prefix = any(slug.startswith(p) for p in VALID_PREFIXES)
+            if has_prefix:
+                ctx.source_name = slug
+                return True
+
+        return False
+
+    async def _apply_enrichment(self, user_id: int, ctx: SourceCreateContext) -> str:
+        """Apply the staged enrichment changes to the source.
+
+        Persists all staged fields, clears pending context, and returns
+        the final source summary with 'We are now in note mode.'
+        Does NOT mention what the next audio will do.
+        """
+        source_id = ctx.source_id
+        if not source_id:
+            return "❌ No source to update. Use /create to start."
+
+        new_name = ctx.source_name
+        new_author = ctx.author
+        new_comment = ctx.comment
+        new_type = ctx.type
+
+        # If type changed and name still has the old type's prefix, re-derive name prefix
+        if new_type and new_name:
+            new_prefix = _TYPE_PREFIX_MAP.get(new_type, "wb")
+            # Check if current name has a mismatched prefix
+            for old_type, old_prefix in _TYPE_PREFIX_MAP.items():
+                if old_type != new_type and new_name.startswith(f"{old_prefix}-"):
+                    # Re-derive name with new prefix
+                    new_name = f"{new_prefix}-{new_name[len(old_prefix) + 1:]}"
+                    break
+
         try:
             updated = await self._source_service.update_source(
                 source_id=source_id,
                 source_name=new_name,
                 author=new_author,
                 comment=new_comment,
+                type=new_type,
             )
             if not updated:
                 return "❌ Failed to update source. Please try again."
 
-            # Update context
+            # Update context for the final summary
             if new_name:
                 ctx.source_name = new_name
-            if new_author:
-                ctx.author = new_author
-            if new_comment:
-                ctx.comment = new_comment
+            if new_type:
+                ctx.source_type = new_type
 
             self.clear_pending(user_id)
             logger.info(
@@ -602,18 +859,22 @@ class SourceCreateAgent:
                 extra={
                     "source_id": source_id,
                     "source_name": ctx.source_name,
+                    "type": ctx.source_type,
                     "author": ctx.author,
                     "comment": ctx.comment,
                 },
             )
 
             final_name = ctx.source_name or ctx.suggested_name or "unknown"
+            final_type = ctx.type or ctx.source_type or "unknown"
             return (
-                f"✅ Source \"{final_name}\" is ready!\n"
-                f"📎 Type: {ctx.source_type}\n"
-                f"🔗 URL: {ctx.url or 'N/A'}\n"
-                f"👤 Author: {ctx.author or 'N/A'}\n"
-                f"💬 Comment: {ctx.comment or 'N/A'}"
+                f"✅ Source updated!\n"
+                f"📝 Name: {final_name}\n"
+                f"📎 Type: {final_type}\n"
+                f"🔗 URL: {ctx.url or '(empty)'}\n"
+                f"👤 Author: {ctx.author or '(empty)'}\n"
+                f"💬 Comment: {ctx.comment or '(empty)'}\n\n"
+                f"We are now in note mode."
             )
         except Exception as exc:
             logger.error(
@@ -762,24 +1023,8 @@ class SourceCreateAgent:
         elif ctx.step == SourceCreateStep.AWAITING_COMMENT:
             if not is_skip:
                 ctx.comment = text
-            # Trigger update
-            if ctx.source_id:
-                action = {
-                    "action": "update_source",
-                    "source_name": ctx.source_name,
-                    "author": ctx.author,
-                    "comment": ctx.comment,
-                }
-                return await self._handle_update_action(action, user_id, ctx)
-            else:
-                # /create flow — create the source
-                action = {
-                    "action": "create_source",
-                    "source_name": ctx.source_name or ctx.suggested_name,
-                    "type": ctx.source_type,
-                    "author": ctx.author,
-                    "comment": ctx.comment,
-                }
-                return await self._handle_create_action(action, user_id, ctx)
+            # Transition to confirmation instead of auto-applying
+            ctx.step = SourceCreateStep.AWAITING_CONFIRMATION
+            return self._build_confirmation_summary(ctx)
 
         return "Please use /create to start a new source creation."
