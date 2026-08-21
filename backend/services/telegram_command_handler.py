@@ -58,6 +58,7 @@ HELP_MESSAGE = (
     "🔢 /reflect stats — show internalization progress\n"
     "📚 /build_doc — synthesize pending notes into a session document\n"
     "📊 /build_doc stats — preview pending notes without synthesizing\n"
+    "🔄 /update — enrich active source metadata (name, author, comment)\n"
     "❓ /help — show this message\n\n"
     "⚙️ Commands that require arguments:\n\n"
     "➕ /create — create a source (guided flow)\n"
@@ -65,7 +66,8 @@ HELP_MESSAGE = (
     "➕ /create <url> — create a source from a URL\n"
     "🔀 /switch <name> — switch to a source by name\n"
     "🏷️ /label <name> — add a label\n\n"
-    "💡 Tip: Send a URL as the entire message to create a source from it."
+    "💡 Tip: Send a URL as the entire message to create a source from it. "
+    "Then use /update to enrich it."
 )
 
 MODE_DISPLAY_NAMES = {
@@ -132,6 +134,8 @@ class TelegramCommandHandler:
             reply = self._handle_agent_mode()
         elif command == "/note":
             reply = self._handle_note_mode()
+        elif command == "/update":
+            reply = await self._handle_enrich(from_user_id or 0)
         elif command == "/help":
             reply = self._handle_help()
         else:
@@ -145,6 +149,12 @@ class TelegramCommandHandler:
         if self._source_create_agent:
             # Determine user_id from context (use 0 as fallback for command handler)
             user_id = getattr(self, "_current_user_id", 0)
+            # If argument is a URL, use deterministic creation (no LLM, no enrichment)
+            if argument and UrlDetectorService.is_url(argument):
+                url = UrlDetectorService.extract_url(argument)
+                return await self._source_create_agent.create_source_from_url(
+                    url, user_id
+                )
             return await self._source_create_agent.start_create_flow(
                 user_id, name_or_url=argument or None
             )
@@ -164,6 +174,17 @@ class TelegramCommandHandler:
         logger.info("telegram.command.create", extra={"slug": slug})
         return CREATE_SUCCESS.format(slug=slug)
 
+    async def _handle_enrich(self, user_id: int) -> str:
+        """Handle /update command — start enrichment for the active source."""
+        if not self._source_create_agent:
+            return "⚠️ Source creation agent is not configured."
+
+        active_source = await self._source_service.get_active_source()
+        if not active_source:
+            return "⚠️ No active source. Use /switch or /default to set one."
+
+        return await self._source_create_agent.start_enrich_flow(user_id, active_source)
+
     async def _handle_switch(self, argument: str) -> str:
         if not argument or not validate_slug_input(argument):
             return INVALID_NAME
@@ -174,6 +195,10 @@ class TelegramCommandHandler:
             return SWITCH_NOT_FOUND.format(slug=slug)
 
         await self._source_service.activate_source_by_id(existing["id"])
+        # Invalidate any stale pending update context for this user
+        if self._source_create_agent:
+            user_id = getattr(self, "_current_user_id", 0)
+            self._source_create_agent.clear_pending(user_id)
         logger.info("telegram.command.switch", extra={"slug": slug})
         return SWITCH_SUCCESS.format(slug=slug)
 
@@ -183,6 +208,11 @@ class TelegramCommandHandler:
             default_source = await self._source_service.ensure_default_source()
         else:
             await self._source_service.activate_source_by_id(default_source["id"])
+
+        # Invalidate any stale pending update context for this user
+        if self._source_create_agent:
+            user_id = getattr(self, "_current_user_id", 0)
+            self._source_create_agent.clear_pending(user_id)
 
         logger.info("telegram.command.default")
         return DEFAULT_SUCCESS

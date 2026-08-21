@@ -61,7 +61,7 @@ class TestSourceUpdateRequest:
 
 
 class TestCreateImmediatelyThenEnrich:
-    """v2: Source is created IMMEDIATELY on URL detection."""
+    """v2: Source is created IMMEDIATELY on URL detection, enrichment via /update."""
 
     def _make_agent(self) -> SourceCreateAgent:
         svc = AsyncMock()
@@ -87,9 +87,9 @@ class TestCreateImmediatelyThenEnrich:
 
     @pytest.mark.anyio
     async def test_url_creates_source_immediately(self) -> None:
-        """Source is created in DB BEFORE agent asks any questions."""
+        """Source is created in DB BEFORE /update is called."""
         agent = self._make_agent()
-        reply = await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        reply = await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
 
         # Verify create_source_and_optionally_activate was called immediately
         agent._source_service.create_source_and_optionally_activate.assert_awaited_once_with(
@@ -104,28 +104,41 @@ class TestCreateImmediatelyThenEnrich:
         assert "youtube" in reply
 
     @pytest.mark.anyio
-    async def test_source_id_in_pending_context(self) -> None:
-        """After immediate creation, source_id is stored in pending context."""
+    async def test_no_pending_context_after_url_creation(self) -> None:
+        """After deterministic creation, no pending context is set."""
         agent = self._make_agent()
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
 
         ctx = agent.get_pending_context(1)
-        assert ctx is not None
-        assert ctx.source_id == "src-123"
-        assert ctx.step == SourceCreateStep.AWAITING_NAME_CONFIRM
+        assert ctx is None
 
     @pytest.mark.anyio
-    async def test_enrich_updates_source(self) -> None:
-        """After immediate creation, agent UPDATES the source with user's answers."""
+    async def test_enrich_via_update_flow(self) -> None:
+        """After creation, /update starts enrichment, then user answers update the source."""
         agent = self._make_agent()
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
+
+        # /update starts enrichment
+        active_source = {
+            "id": "src-123",
+            "source_name": "yt-youtube-watch",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
 
         # Accept name
         await agent.handle_response("yes", user_id=1)
         # Provide author
         await agent.handle_response("Javier Maza", user_id=1)
-        # Provide comment → triggers update
+        # Provide comment → shows confirmation summary
         await agent.handle_response("Entrevista", user_id=1)
+
+        # Not yet applied — awaiting confirmation
+        agent._source_service.update_source.assert_not_awaited()
+
+        # Confirm → triggers update
+        await agent.handle_response("confirm", user_id=1)
 
         # Verify update_source was called
         agent._source_service.update_source.assert_awaited_once()
@@ -136,14 +149,25 @@ class TestCreateImmediatelyThenEnrich:
     async def test_name_override_updates_source(self) -> None:
         """User can override the suggested name, which is then updated."""
         agent = self._make_agent()
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
+
+        active_source = {
+            "id": "src-123",
+            "source_name": "yt-youtube-watch",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
 
         # Override name
         await agent.handle_response("yt-fin-aprendizaje", user_id=1)
         # Provide author
         await agent.handle_response("Javier Maza", user_id=1)
-        # Provide comment → triggers update
+        # Provide comment → shows confirmation
         await agent.handle_response("Entrevista", user_id=1)
+
+        # Confirm → triggers update
+        await agent.handle_response("apply", user_id=1)
 
         # Verify update was called with the new name
         agent._source_service.update_source.assert_awaited_once()
@@ -159,7 +183,7 @@ class TestCreateImmediatelyThenEnrich:
         svc.create_source_and_optionally_activate = AsyncMock()
         agent = SourceCreateAgent(source_service=svc)
 
-        reply = await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        reply = await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
 
         assert "already exists" in reply
         # Verify create was NOT called
@@ -411,7 +435,14 @@ class TestAgentWithLLM:
     async def test_llm_called_with_correct_model(self) -> None:
         """Agent uses gpt-5.6-luna with reasoning_effort=medium."""
         agent = self._make_agent_with_llm("Just a text response")
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
+        active_source = {
+            "id": "src-123",
+            "source_name": "yt-youtube-watch",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
         await agent.handle_response("some text", user_id=1)
 
         # Verify LLM was called with correct model
@@ -422,7 +453,7 @@ class TestAgentWithLLM:
 
     @pytest.mark.anyio
     async def test_llm_json_action_triggers_update(self) -> None:
-        """When LLM returns JSON with action=update_source, source is updated."""
+        """When LLM returns JSON with action=update_source, confirmation summary is shown."""
         json_response = """Here's the confirmation:
 ```json
 {
@@ -434,19 +465,40 @@ class TestAgentWithLLM:
 ```
 """
         agent = self._make_agent_with_llm(json_response)
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
+        active_source = {
+            "id": "src-123",
+            "source_name": "yt-youtube-watch",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
 
         reply = await agent.handle_response("el video trata sobre el fin del aprendizaje", user_id=1)
 
-        # Verify update was called
+        # LLM JSON action transitions to confirmation (not immediate apply)
+        assert "Here's what I'll update" in reply
+        assert "yt-fin-aprendizaje" in reply
+        assert "Javier Maza" in reply
+        agent._source_service.update_source.assert_not_awaited()
+
+        # Confirm → applies
+        reply = await agent.handle_response("confirm", user_id=1)
         agent._source_service.update_source.assert_awaited_once()
-        assert "✅" in reply or "ready" in reply.lower()
+        assert "✅ Source updated" in reply
 
     @pytest.mark.anyio
     async def test_llm_text_response_mid_conversation(self) -> None:
         """When LLM returns plain text, it's passed through to the user."""
         agent = self._make_agent_with_llm("👤 Who is the author? (or say 'skip')")
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
+        active_source = {
+            "id": "src-123",
+            "source_name": "yt-youtube-watch",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
 
         reply = await agent.handle_response("yes", user_id=1)
 
@@ -471,7 +523,7 @@ class TestCreateFlows:
         assert ctx.step == SourceCreateStep.AWAITING_TYPE
 
     @pytest.mark.anyio
-    async def test_create_with_url_delegates_to_url_flow(self) -> None:
+    async def test_create_with_url_delegates_to_deterministic_creation(self) -> None:
         svc = AsyncMock()
         svc._repository = AsyncMock()
         svc._repository.get_source_by_url = AsyncMock(return_value=None)
@@ -485,6 +537,8 @@ class TestCreateFlows:
         assert "✅ Source created" in reply
         # Should have created immediately
         svc.create_source_and_optionally_activate.assert_awaited_once()
+        # No pending context after deterministic creation
+        assert agent.get_pending_context(1) is None
 
     @pytest.mark.anyio
     async def test_create_with_prefixed_name(self) -> None:
@@ -612,5 +666,6 @@ class TestSourceServiceUpdateSource:
             source_name="yt-new",
             author=None,
             comment=None,
+            type=None,
         )
         assert result is not None

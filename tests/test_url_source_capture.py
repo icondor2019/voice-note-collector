@@ -202,27 +202,24 @@ class TestSourceCreateAgent:
         return SourceCreateAgent(source_service=svc)
 
     @pytest.mark.anyio
-    async def test_start_url_flow_returns_detection_message(self) -> None:
+    async def test_create_source_from_url_returns_confirmation(self) -> None:
         agent = self._make_agent()
-        reply = await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        reply = await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
         assert "youtube" in reply
         assert "https://youtube.com/watch?v=abc" in reply
-        assert "✅ Source created" in reply  # v2: immediate creation
-        assert agent.get_pending_context(1) is not None
-        # v2: source_id should be set in context
-        ctx = agent.get_pending_context(1)
-        assert ctx is not None
-        assert ctx.source_id == "1"
+        assert "✅ Source created" in reply
+        # No pending context after deterministic creation
+        assert agent.get_pending_context(1) is None
 
     @pytest.mark.anyio
-    async def test_start_url_flow_duplicate_url(self) -> None:
+    async def test_create_source_from_url_duplicate_url(self) -> None:
         svc = AsyncMock()
         svc._repository = AsyncMock()
         svc._repository.get_source_by_url = AsyncMock(
             return_value={"source_name": "existing-source"}
         )
         agent = SourceCreateAgent(source_service=svc)
-        reply = await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        reply = await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
         assert "already exists" in reply
         assert agent.get_pending_context(1) is None
 
@@ -238,7 +235,8 @@ class TestSourceCreateAgent:
         agent = self._make_agent()
         reply = await agent.start_create_flow(user_id=1, name_or_url="https://youtube.com/watch?v=abc")
         assert "youtube" in reply
-        assert agent.get_pending_context(1) is not None
+        # Deterministic creation: no pending context
+        assert agent.get_pending_context(1) is None
 
     @pytest.mark.anyio
     async def test_start_create_flow_with_prefixed_name(self) -> None:
@@ -262,28 +260,56 @@ class TestSourceCreateAgent:
         assert "No pending" in reply
 
     @pytest.mark.anyio
-    async def test_full_flow_url(self) -> None:
-        """Test the complete URL flow: URL → immediate create → name → author → comment → update."""
+    async def test_full_flow_url_create_then_enrich(self) -> None:
+        """Test the decoupled flow: URL create → /update → name → author → comment → confirm → update."""
         agent = self._make_agent()
 
-        # Step 1: Start URL flow — source created IMMEDIATELY
-        reply = await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
-        assert "✅ Source created" in reply  # v2: immediate creation
+        # Step 1: Deterministic URL creation — no pending context
+        reply = await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
+        assert "✅ Source created" in reply
+        assert agent.get_pending_context(1) is None
+
+        # Step 2: /update starts enrichment for the active source
+        active_source = {
+            "id": "1",
+            "source_name": "yt-test-video",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+            "author": None,
+            "comment": None,
+        }
+        reply = await agent.start_enrich_flow(1, active_source)
+        assert "yt-test-video" in reply
         ctx = agent.get_pending_context(1)
         assert ctx is not None
-        assert ctx.source_id == "1"  # source already exists
+        assert ctx.source_id == "1"
 
-        # Step 2: Accept suggested name
+        # Step 3: Accept suggested name
         reply = await agent.handle_response("yes", user_id=1)
         assert "author" in reply.lower()
 
-        # Step 3: Provide author
+        # Step 4: Provide author
         reply = await agent.handle_response("John Doe", user_id=1)
         assert "comment" in reply.lower()
 
-        # Step 4: Provide comment — triggers update
+        # Step 5: Provide comment — shows confirmation summary (no auto-apply)
         reply = await agent.handle_response("Great tutorial", user_id=1)
-        assert "✅" in reply or "ready" in reply.lower()
+        assert "Here's what I'll update" in reply
+        assert "yt-test-video" in reply
+        assert "John Doe" in reply
+        assert "Great tutorial" in reply
+        assert "Anything else to add" in reply
+
+        # Context should still be pending (awaiting confirmation)
+        assert agent.get_pending_context(1) is not None
+
+        # update_source should NOT have been called yet
+        agent._source_service.update_source.assert_not_awaited()
+
+        # Step 6: Confirm — applies changes
+        reply = await agent.handle_response("confirm", user_id=1)
+        assert "✅ Source updated" in reply
+        assert "We are now in note mode" in reply
 
         # Context should be cleared
         assert agent.get_pending_context(1) is None
@@ -295,7 +321,13 @@ class TestSourceCreateAgent:
     async def test_always_ask_rule_author(self) -> None:
         """Verify the agent asks for author even though it's optional."""
         agent = self._make_agent()
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        active_source = {
+            "id": "1",
+            "source_name": "yt-test-video",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
         # Accept name → should ask for author
         reply = await agent.handle_response("yes", user_id=1)
         # After name step, agent MUST ask for author
@@ -305,7 +337,13 @@ class TestSourceCreateAgent:
     async def test_always_ask_rule_comment(self) -> None:
         """Verify the agent asks for comment even though it's optional."""
         agent = self._make_agent()
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        active_source = {
+            "id": "1",
+            "source_name": "yt-test-video",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
         await agent.handle_response("yes", user_id=1)  # accept name → asks author
         reply = await agent.handle_response("skip", user_id=1)  # skip author → asks comment
         # After author step, agent MUST ask for comment
@@ -315,16 +353,32 @@ class TestSourceCreateAgent:
     async def test_skip_author_and_comment(self) -> None:
         """User can skip optional fields."""
         agent = self._make_agent()
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        active_source = {
+            "id": "1",
+            "source_name": "yt-test-video",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
         await agent.handle_response("yes", user_id=1)  # accept name
         await agent.handle_response("skip", user_id=1)  # skip author
-        reply = await agent.handle_response("skip", user_id=1)  # skip comment → update
-        assert "✅" in reply or "ready" in reply.lower()
+        reply = await agent.handle_response("skip", user_id=1)  # skip comment → confirmation
+        assert "Here's what I'll update" in reply
+        assert "(empty)" in reply  # empty fields shown
+        # Confirm to apply
+        reply = await agent.handle_response("apply", user_id=1)
+        assert "✅ Source updated" in reply
 
     @pytest.mark.anyio
     async def test_clear_pending(self) -> None:
         agent = self._make_agent()
-        await agent.start_url_flow("https://youtube.com/watch?v=abc", user_id=1)
+        active_source = {
+            "id": "1",
+            "source_name": "yt-test-video",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, active_source)
         assert agent.get_pending_context(1) is not None
         agent.clear_pending(1)
         assert agent.get_pending_context(1) is None

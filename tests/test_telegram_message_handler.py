@@ -5,6 +5,7 @@ import pytest
 from backend.models.agent import MultiAgentResult
 from backend.services.chat_mode_service import ChatModeService
 from backend.services.reflection_service import ReflectionService
+from backend.services.source_create_agent import SourceCreateAgent, SourceCreateContext
 from backend.services.source_service import SourceService
 from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.telegram_message_handler import TelegramMessageHandler
@@ -49,6 +50,7 @@ def _build_handler(
     multi_agent_service: AsyncMock | None = None,
     reflection_service: ReflectionService | None = None,
     source_service: AsyncMock | None = None,
+    source_create_agent: SourceCreateAgent | None = None,
 ) -> tuple[
     TelegramMessageHandler,
     Mock,
@@ -118,6 +120,7 @@ def _build_handler(
         multi_agent_service=agent_service,
         reflection_service=reflection_service,
         source_service=source_service or AsyncMock(spec=SourceService),
+        source_create_agent=source_create_agent,
     )
     return (
         handler,
@@ -427,3 +430,159 @@ async def test_audio_agent_mode_passes_transcription_to_agent() -> None:
     await_args = agent_svc.handle.call_args
     assert await_args[0][0] == "transcribed"
     assert await_args[1]["telegram_user_id"] == settings.TELEGRAM_ALLOWED_USER_ID
+
+
+# ── Pending source-create/update context routing ─────────────────────────────
+
+@pytest.mark.anyio
+async def test_audio_with_pending_enrichment_context_routes_to_multi_agent() -> None:
+    """Audio in note mode with pending enrichment context should route to multi-agent, not save as note."""
+    event = _build_event(message_type="voice")
+    # Note mode (default)
+    chat_mode_service = ChatModeService()
+    assert chat_mode_service.get_mode() == "note"
+    
+    # Create a source_create_agent with pending context
+    source_create_agent = Mock(spec=SourceCreateAgent)
+    pending_ctx = SourceCreateContext(
+        source_type="youtube",
+        url="https://youtube.com/watch?v=abc",
+        source_name="yt-test-video",
+        source_id="source-123",
+    )
+    source_create_agent.get_pending_context = Mock(return_value=pending_ctx)
+    
+    handler, _, _, trans_svc, _, bot_client, agent_svc, _, _ = _build_handler(
+        event,
+        chat_mode_service=chat_mode_service,
+        source_create_agent=source_create_agent,
+        raw_text="The author is John Doe",
+    )
+
+    result = await handler.handle({"message": {"chat": {"id": 123}}})
+
+    # Should transcribe
+    trans_svc.transcribe_telegram_audio.assert_called_once_with("file-id")
+    # Should route to multi-agent (not save as note)
+    agent_svc.handle.assert_awaited_once()
+    await_args = agent_svc.handle.call_args
+    assert await_args[0][0] == "The author is John Doe"
+    assert await_args[1]["telegram_user_id"] == settings.TELEGRAM_ALLOWED_USER_ID
+    # Should send the LLM reply
+    bot_client.send_message.assert_awaited_once_with(123, "LLM reply")
+    assert result == {"outcome": "agent_response", "message_type": "voice"}
+
+
+@pytest.mark.anyio
+async def test_text_with_pending_enrichment_context_routes_to_multi_agent() -> None:
+    """Text in note mode with pending enrichment context should route to multi-agent, not be ignored."""
+    event = _build_event(message_type="text")
+    # Note mode (default)
+    chat_mode_service = ChatModeService()
+    assert chat_mode_service.get_mode() == "note"
+    
+    # Create a source_create_agent with pending context
+    source_create_agent = Mock(spec=SourceCreateAgent)
+    pending_ctx = SourceCreateContext(
+        source_type="youtube",
+        url="https://youtube.com/watch?v=abc",
+        source_name="yt-test-video",
+        source_id="source-123",
+    )
+    source_create_agent.get_pending_context = Mock(return_value=pending_ctx)
+    
+    handler, _, _, _, _, bot_client, agent_svc, _, _ = _build_handler(
+        event,
+        chat_mode_service=chat_mode_service,
+        source_create_agent=source_create_agent,
+    )
+    update = {"message": {"text": "The author is John Doe", "chat": {"id": 123}}}
+
+    result = await handler.handle(update)
+
+    # Should route to multi-agent (not be ignored)
+    agent_svc.handle.assert_awaited_once()
+    await_args = agent_svc.handle.call_args
+    assert await_args[0][0] == "The author is John Doe"
+    assert await_args[1]["telegram_user_id"] == settings.TELEGRAM_ALLOWED_USER_ID
+    # Should send the LLM reply
+    bot_client.send_message.assert_awaited_once_with(123, "LLM reply")
+    assert result == {"outcome": "agent_response", "message_type": "text"}
+
+
+@pytest.mark.anyio
+async def test_audio_without_pending_context_in_note_mode_saves_as_note() -> None:
+    """Audio in note mode without pending context should save as note (existing behavior)."""
+    event = _build_event(message_type="voice")
+    # Note mode (default)
+    chat_mode_service = ChatModeService()
+    assert chat_mode_service.get_mode() == "note"
+    
+    # No source_create_agent configured
+    handler, _, _, _, _, bot_client, agent_svc, _, _ = _build_handler(
+        event,
+        chat_mode_service=chat_mode_service,
+        source_create_agent=None,
+    )
+
+    result = await handler.handle({"message": {"chat": {"id": 123}}})
+
+    # Should NOT route to multi-agent
+    agent_svc.handle.assert_not_awaited()
+    # Should save as note
+    assert result == {"outcome": "stored", "message_type": "voice"}
+    # Should send success notification
+    bot_client.send_message.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_text_without_pending_context_in_note_mode_is_ignored() -> None:
+    """Text in note mode without pending context should be ignored (existing behavior)."""
+    event = _build_event(message_type="text")
+    # Note mode (default)
+    chat_mode_service = ChatModeService()
+    assert chat_mode_service.get_mode() == "note"
+    
+    # No source_create_agent configured
+    handler, _, _, _, _, bot_client, agent_svc, _, _ = _build_handler(
+        event,
+        chat_mode_service=chat_mode_service,
+        source_create_agent=None,
+    )
+    update = {"message": {"text": "hello", "chat": {"id": 123}}}
+
+    result = await handler.handle(update)
+
+    # Should NOT route to multi-agent
+    agent_svc.handle.assert_not_awaited()
+    # Should be ignored
+    bot_client.send_message.assert_not_awaited()
+    assert result == {"outcome": "ignored", "message_type": "text"}
+
+
+@pytest.mark.anyio
+async def test_audio_with_source_create_agent_but_no_pending_context_saves_as_note() -> None:
+    """Audio with source_create_agent configured but no pending context should save as note."""
+    event = _build_event(message_type="voice")
+    # Note mode (default)
+    chat_mode_service = ChatModeService()
+    assert chat_mode_service.get_mode() == "note"
+    
+    # source_create_agent configured but no pending context for this user
+    source_create_agent = Mock(spec=SourceCreateAgent)
+    source_create_agent.get_pending_context = Mock(return_value=None)
+    
+    handler, _, _, _, _, bot_client, agent_svc, _, _ = _build_handler(
+        event,
+        chat_mode_service=chat_mode_service,
+        source_create_agent=source_create_agent,
+    )
+
+    result = await handler.handle({"message": {"chat": {"id": 123}}})
+
+    # Should NOT route to multi-agent
+    agent_svc.handle.assert_not_awaited()
+    # Should save as note
+    assert result == {"outcome": "stored", "message_type": "voice"}
+    # Should send success notification
+    bot_client.send_message.assert_awaited_once()
