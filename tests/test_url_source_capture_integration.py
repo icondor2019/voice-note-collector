@@ -41,6 +41,7 @@ def _make_source_create_agent() -> SourceCreateAgent:
     svc = AsyncMock()
     svc._repository = AsyncMock()
     svc._repository.get_source_by_url = AsyncMock(return_value=None)
+    svc._repository.get_source_by_name = AsyncMock(return_value=None)
     svc.create_source_and_optionally_activate = AsyncMock(
         return_value={"id": "1", "source_name": "yt-test-video", "type": "youtube"}
     )
@@ -238,7 +239,7 @@ async def test_create_with_url_routes_to_deterministic_creation() -> None:
 
 @pytest.mark.anyio
 async def test_create_with_name_routes_to_agent() -> None:
-    """/create <name> triggers agent conversation for name-based creation."""
+    """/create <name> creates source immediately, no pending context."""
     source_service = AsyncMock()
     bot_client = AsyncMock()
     labels_repository = AsyncMock()
@@ -256,9 +257,9 @@ async def test_create_with_name_routes_to_agent() -> None:
     reply = await handler.handle_text("/create yt-my-video", chat_id=123, from_user_id=456)
 
     assert "yt-my-video" in reply
+    assert "Source created" in reply
     ctx = source_create_agent.get_pending_context(456)
-    assert ctx is not None
-    assert ctx.source_name == "yt-my-video"
+    assert ctx is None
 
 
 @pytest.mark.anyio
