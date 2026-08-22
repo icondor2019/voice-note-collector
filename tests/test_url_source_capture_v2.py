@@ -67,6 +67,7 @@ class TestCreateImmediatelyThenEnrich:
         svc = AsyncMock()
         svc._repository = AsyncMock()
         svc._repository.get_source_by_url = AsyncMock(return_value=None)
+        svc._repository.get_source_by_name = AsyncMock(return_value=None)
         svc.create_source_and_optionally_activate = AsyncMock(
             return_value={
                 "id": "src-123",
@@ -543,20 +544,42 @@ class TestCreateFlows:
     @pytest.mark.anyio
     async def test_create_with_prefixed_name(self) -> None:
         svc = AsyncMock()
+        svc._repository = AsyncMock()
+        svc._repository.get_source_by_url = AsyncMock(return_value=None)
+        svc._repository.get_source_by_name = AsyncMock(return_value=None)
+        svc.create_source_and_optionally_activate = AsyncMock(
+            return_value={
+                "id": "src-123",
+                "source_name": "yt-my-video",
+                "type": None,
+                "status": "active",
+            }
+        )
         agent = SourceCreateAgent(source_service=svc)
         reply = await agent.start_create_flow(user_id=1, name_or_url="yt-my-video")
         assert "yt-my-video" in reply
+        assert "Source created" in reply
         ctx = agent.get_pending_context(1)
-        assert ctx is not None
-        assert ctx.source_name == "yt-my-video"
-        assert ctx.step == SourceCreateStep.AWAITING_TYPE
+        assert ctx is None
 
     @pytest.mark.anyio
     async def test_create_with_invalid_name(self) -> None:
+        """No prefix validation — any non-empty name creates immediately."""
         svc = AsyncMock()
+        svc._repository = AsyncMock()
+        svc._repository.get_source_by_name = AsyncMock(return_value=None)
+        svc.create_source_and_optionally_activate = AsyncMock(
+            return_value={
+                "id": "src-123",
+                "source_name": "no-prefix",
+                "type": None,
+                "status": "active",
+            }
+        )
         agent = SourceCreateAgent(source_service=svc)
         reply = await agent.start_create_flow(user_id=1, name_or_url="no-prefix")
-        assert "prefix" in reply.lower()
+        assert "Source created" in reply
+        assert "no-prefix" in reply
 
 
 # ── SourcesRepository.update_source ─────────────────────────────────────────

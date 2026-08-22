@@ -40,6 +40,7 @@ def _make_agent_with_mock_service() -> SourceCreateAgent:
     svc = AsyncMock()
     svc._repository = AsyncMock()
     svc._repository.get_source_by_url = AsyncMock(return_value=None)
+    svc._repository.get_source_by_name = AsyncMock(return_value=None)
     svc.create_source_and_optionally_activate = AsyncMock(
         return_value={
             "id": "src-123",
@@ -454,17 +455,16 @@ class TestExistingFlowsPreserved:
 
     @pytest.mark.anyio
     async def test_create_name_still_name_based(self) -> None:
-        """/create <name> still starts name-based creation flow."""
+        """/create <name> creates source immediately, no pending context."""
         agent = _make_agent_with_mock_service()
         handler = _build_command_handler(source_create_agent=agent)
         reply = await handler.handle_text(
             "/create yt-my-video", chat_id=123, from_user_id=456
         )
         assert "yt-my-video" in reply
+        assert "Source created" in reply
         ctx = agent.get_pending_context(456)
-        assert ctx is not None
-        assert ctx.source_name == "yt-my-video"
-        assert ctx.step == SourceCreateStep.AWAITING_TYPE
+        assert ctx is None
 
 
 # ── HELP_MESSAGE ──────────────────────────────────────────────────────────────

@@ -212,6 +212,7 @@ class SourceCreateContext:
         type: Optional[str] = None,
         step: SourceCreateStep = SourceCreateStep.AWAITING_NAME_CONFIRM,
         conversation_history: Optional[list[dict[str, str]]] = None,
+        flow: str = "enrich",
     ) -> None:
         self.source_type = source_type
         self.url = url
@@ -223,6 +224,7 @@ class SourceCreateContext:
         self.type = type
         self.step = step
         self.conversation_history: list[dict[str, str]] = conversation_history or []
+        self.flow = flow
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -236,6 +238,7 @@ class SourceCreateContext:
             "type": self.type,
             "step": self.step.value,
             "conversation_history": self.conversation_history,
+            "flow": self.flow,
         }
 
     @classmethod
@@ -251,6 +254,7 @@ class SourceCreateContext:
             type=data.get("type"),
             step=SourceCreateStep(data.get("step", "awaiting_name_confirm")),
             conversation_history=data.get("conversation_history", []),
+            flow=data.get("flow", "enrich"),
         )
 
 
@@ -471,6 +475,7 @@ class SourceCreateAgent:
             comment=comment,
             type=source_type,
             step=SourceCreateStep.AWAITING_NAME_CONFIRM,
+            flow="enrich",
         )
         # Seed conversation history with the source's CURRENT state
         ctx.conversation_history.append(
@@ -506,36 +511,55 @@ class SourceCreateAgent:
             url = UrlDetectorService.extract_url(name_or_url)
             return await self.create_source_from_url(url, user_id)
 
-        # If argument is a name, validate and pre-fill
+        # If argument is a name, create immediately (no guided flow)
         if name_or_url:
             slug = slugify(name_or_url)
-            # Check if the name already has a valid prefix
-            has_prefix = any(slug.startswith(p) for p in VALID_PREFIXES)
-            if not has_prefix:
+            if not slug:
+                return "❌ Invalid source name. Use /create without arguments to start the guided flow."
+
+            # Check for duplicate name
+            existing = await self._source_service._repository.get_source_by_name(slug)
+            if existing:
                 return (
-                    f"❌ Source name must start with a type prefix.\n\n"
-                    f"Valid prefixes: {', '.join(VALID_PREFIXES)}\n"
-                    f"Example: yt-my-video, bk-cookbook-recipes, th-daily-thoughts\n\n"
-                    f"Use /create without arguments to start the guided flow."
+                    f"❌ Source \"{slug}\" already exists. Use /switch to activate it."
                 )
 
-            ctx = SourceCreateContext(
-                source_type="web",  # will be asked
-                source_name=slug,
-                suggested_name=slug,
-                step=SourceCreateStep.AWAITING_TYPE,
-            )
-            self._pending[user_id] = ctx
+            # Create immediately with activate=True, type=None
+            try:
+                source = await self._source_service.create_source_and_optionally_activate(
+                    source_name=slug,
+                    activate=True,
+                    type=None,
+                )
+                source_id = source.get("id")
+                logger.info(
+                    "source_create_agent.created",
+                    extra={
+                        "source_id": source_id,
+                        "source_name": slug,
+                        "type": None,
+                    },
+                )
+            except ValueError as exc:
+                return f"❌ {exc}"
+            except Exception as exc:
+                logger.error(
+                    "source_create_agent.named_create_failed",
+                    extra={"error": str(exc)},
+                )
+                return "❌ Failed to create source. Please try again with /create."
+
             return (
-                f"📝 Source name: {slug}\n\n"
-                f"What type of source is this?\n"
-                f"({', '.join(sorted(VALID_SOURCE_TYPES))})"
+                f"✅ Source created and activated: {slug}.\n\n"
+                f"We are now in note mode.\n"
+                f"Use /update to enrich this source (name, author, comment)."
             )
 
         # No argument — start guided flow
         ctx = SourceCreateContext(
             source_type="thought",
             step=SourceCreateStep.AWAITING_TYPE,
+            flow="create",
         )
         self._pending[user_id] = ctx
         return (
@@ -719,6 +743,12 @@ class SourceCreateAgent:
         """
         text_lower = text.lower().strip()
 
+        # Dispatch based on flow marker: create vs enrich
+        async def _apply_or_create() -> str:
+            if ctx.flow == "create":
+                return await self._create_source_from_context(user_id, ctx)
+            return await self._apply_enrichment(user_id, ctx)
+
         # Clear affirmative responses
         affirmative = {
             "confirm", "correct", "go ahead", "yes", "apply", "that's all",
@@ -726,7 +756,7 @@ class SourceCreateAgent:
             "apply it", "apply changes", "save", "save it",
         }
         if text_lower in affirmative:
-            return await self._apply_enrichment(user_id, ctx)
+            return await _apply_or_create()
 
         # "no, that's all" variants — clear answer to "anything else?"
         no_thats_all = {
@@ -735,7 +765,7 @@ class SourceCreateAgent:
             "nope, apply", "no, go ahead", "no, go ahead and apply",
         }
         if text_lower in no_thats_all:
-            return await self._apply_enrichment(user_id, ctx)
+            return await _apply_or_create()
 
         # Check for corrections/additions (e.g., "author: Jane", "the type is course")
         correction = self._extract_correction(text, ctx)
@@ -883,6 +913,71 @@ class SourceCreateAgent:
             )
             return "❌ Failed to update source. Please try again."
 
+    async def _create_source_from_context(
+        self, user_id: int, ctx: SourceCreateContext
+    ) -> str:
+        """Create a new source from the collected context (guided /create flow).
+
+        Called by _handle_confirmation_step() when ctx.flow == "create".
+        Extracts name, type, author, comment, and optional URL from the
+        context, creates the source, activates it, clears pending context,
+        and returns a creation confirmation message.
+        """
+        source_name = ctx.source_name or ctx.suggested_name
+        if not source_name:
+            self.clear_pending(user_id)
+            return "❌ Missing source name. Please try again with /create."
+
+        # Validate name prefix
+        has_prefix = any(source_name.startswith(p) for p in VALID_PREFIXES)
+        if not has_prefix:
+            self.clear_pending(user_id)
+            return (
+                f"❌ Source name must start with a type prefix.\n"
+                f"Valid prefixes: {', '.join(VALID_PREFIXES)}"
+            )
+
+        source_type = ctx.type or ctx.source_type
+
+        try:
+            source = await self._source_service.create_source_and_optionally_activate(
+                source_name=source_name,
+                author=ctx.author,
+                comment=ctx.comment,
+                activate=True,
+                url=ctx.url,
+                type=source_type,
+            )
+            self.clear_pending(user_id)
+            logger.info(
+                "source_create_agent.created",
+                extra={
+                    "source_name": source_name,
+                    "type": source_type,
+                    "source_id": source.get("id"),
+                },
+            )
+            final_type = source_type or "unknown"
+            return (
+                f"✅ Source created and activated!\n"
+                f"📝 Name: {source_name}\n"
+                f"📎 Type: {final_type}\n"
+                f"🔗 URL: {ctx.url or '(empty)'}\n"
+                f"👤 Author: {ctx.author or '(empty)'}\n"
+                f"💬 Comment: {ctx.comment or '(empty)'}\n\n"
+                f"We are now in note mode."
+            )
+        except ValueError as exc:
+            self.clear_pending(user_id)
+            return f"❌ {exc}"
+        except Exception as exc:
+            logger.error(
+                "source_create_agent.create_from_context_failed",
+                extra={"error": str(exc)},
+            )
+            self.clear_pending(user_id)
+            return "❌ Failed to create source. Please try again with /create."
+
     async def _handle_create_action(
         self, action: dict[str, Any], user_id: int, ctx: SourceCreateContext
     ) -> str:
@@ -995,6 +1090,20 @@ class SourceCreateAgent:
     ) -> str:
         """Fallback state machine when LLM is unavailable."""
         is_skip = text.lower().strip() in ("skip", "none", "no", "n/a", "-")
+
+        if ctx.step == SourceCreateStep.AWAITING_NAME:
+            # User is providing a name (no suggestion was made yet)
+            slug = slugify(text)
+            has_prefix = any(slug.startswith(p) for p in VALID_PREFIXES)
+            if has_prefix:
+                ctx.source_name = slug
+                ctx.step = SourceCreateStep.AWAITING_AUTHOR
+                return "👤 Who is the author? (or say 'skip' to leave empty)"
+            return (
+                f"❌ Source name must start with a type prefix.\n"
+                f"Valid prefixes: {', '.join(VALID_PREFIXES)}\n"
+                f"Try again."
+            )
 
         if ctx.step == SourceCreateStep.AWAITING_NAME_CONFIRM:
             if text.lower().strip() in ("yes", "y", "ok", "sure", "accept"):

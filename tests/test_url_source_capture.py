@@ -196,6 +196,7 @@ class TestSourceCreateAgent:
         svc = source_service or AsyncMock()
         svc._repository = AsyncMock()
         svc._repository.get_source_by_url = AsyncMock(return_value=None)
+        svc._repository.get_source_by_name = AsyncMock(return_value=None)
         svc.create_source_and_optionally_activate = AsyncMock(
             return_value={"id": "1", "source_name": "yt-test-video", "type": "youtube"}
         )
@@ -243,15 +244,17 @@ class TestSourceCreateAgent:
         agent = self._make_agent()
         reply = await agent.start_create_flow(user_id=1, name_or_url="yt-my-video")
         assert "yt-my-video" in reply
+        assert "Source created" in reply
         ctx = agent.get_pending_context(1)
-        assert ctx is not None
-        assert ctx.source_name == "yt-my-video"
+        assert ctx is None
 
     @pytest.mark.anyio
     async def test_start_create_flow_with_invalid_name(self) -> None:
+        """No prefix validation — any non-empty name creates immediately."""
         agent = self._make_agent()
         reply = await agent.start_create_flow(user_id=1, name_or_url="no-prefix")
-        assert "prefix" in reply.lower()
+        assert "Source created" in reply
+        assert "no-prefix" in reply
 
     @pytest.mark.anyio
     async def test_handle_response_no_pending(self) -> None:
