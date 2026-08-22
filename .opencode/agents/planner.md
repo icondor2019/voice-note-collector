@@ -47,7 +47,7 @@ You MUST NOT create a plan on the first attempt. Every planning session starts w
 ### Step 1: Understand Context
 - Read `docs/project_spec.md` to understand the project
 - Search engram MCP for relevant past context (`sdd/<feature_name>`)
-- **Run graphify query** for the area the feature touches: `if [ -f graphify-out/graph.json ]; then graphify query "<feature topic>"; fi`. Cite findings in the `Context` section of the plan.
+- Consume the Graphify query output supplied by the orchestrator for the area the feature touches. Cite relevant findings in the `Context` section of the plan. Do not treat a missing standalone `graphify` executable as a missing graph.
 - Review existing code in affected areas if applicable
 
 ### Step 2: Ask Clarifying Questions
@@ -204,6 +204,15 @@ You MUST NOT:
 | Skill | Trigger | Path |
 |-------|---------|------|
 | graphify | Any codebase exploration, architecture question, or file-relationship query — use BEFORE reading/grepping files | ~/.config/opencode/skills/graphify/SKILL.md |
+
+## Graphify Context Handoff
+
+This agent has `bash: false`. The orchestrator is responsible for running the
+mandatory Graphify preflight from `AGENTS.md` and including the query result in
+the dispatch prompt. When that context is provided, use it before reviewing
+repository files and do not repeat the repository scan. If it is not provided,
+ask the orchestrator for the Graphify context instead of reporting Graphify as
+unavailable.
 
 ---
 

@@ -42,7 +42,7 @@ From the orchestrator:
 
 ## Responsibilities
 
-- Use the graphify skill (check `graphify-out/graph.json` first) as the first step for any codebase exploration question
+- Use the mandatory Graphify preflight from `AGENTS.md` as the first step for any codebase exploration question
 - Explore the codebase to answer questions
 - Make quick, targeted changes
 - Follow existing code patterns and conventions
@@ -58,19 +58,10 @@ From the orchestrator:
 - Follow existing code style and patterns strictly
 - Prefer reading existing code before writing new code
 - Keep responses concise — report what you found or what you changed
-- **MANDATORY — graphify before exploring.** For any task that touches the codebase (architecture questions, "how does X work", "where is Y defined", tracing data flow, finding a file relationship, etc.):
-  1. Load the graphify skill: read `~/.config/opencode/skills/graphify/SKILL.md`.
-  2. Run this pre-flight — if `graphify-out/graph.json` exists, the question is a natural-language query (not a rebuild), and not an explicit `--update` / `--cluster-only` invocation, treat the request as a graphify query and run `graphify query "<the question>"` immediately. Do NOT read or grep files.
-  3. Only if the graph does not exist, fall back to direct exploration (read, grep, glob, Task/explore agent). The pre-flight:
-
-     ```bash
-     if [ -f graphify-out/graph.json ]; then
-       graphify query "<question>"
-     else
-       echo "No graph found — fall back to read/grep"
-     fi
-     ```
-  4. Escalation: if the user explicitly asks you to read or grep raw files, honor the request — but still log a one-line note in your return summary: "Skipped graphify because user requested raw file access."
+- **MANDATORY — graphify before exploring.** For any task that touches the codebase (architecture questions, "how does X work", "where is Y defined", tracing data flow, finding a file relationship, etc.), load `~/.config/opencode/skills/graphify/SKILL.md` and apply the complete preflight from `AGENTS.md` before reading or grepping files.
+- When `graphify-out/graph.json` exists, it is authoritative even though `graphify-out/` is gitignored. Query it immediately. Prefer `graphify-out/.graphify_python` with `-m graphify query`; the missing standalone `graphify` executable is not a missing graph.
+- If the query CLI cannot run, use the graphify skill's inline NetworkX fallback against `graphify-out/graph.json`. Do not replace that fallback with a raw repository scan.
+- Only report the graph as absent after checking the repository root, the exact absolute path, and the current working directory. If the user explicitly asks for raw files, honor the request after the Graphify preflight and note: "Skipped graphify because user requested raw file access."
 
 ---
 

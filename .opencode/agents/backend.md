@@ -27,6 +27,7 @@ Before writing ANY code:
 - Read the spec section — understand WHAT the code must do
 - Read the design section — understand HOW to structure the code
 - Read the task - understand the need changes required
+- If repository context is needed, apply the mandatory Graphify preflight from `AGENTS.md` before reading existing source files. `graphify-out/graph.json` is a local ignored artifact; its presence is independent of whether the standalone `graphify` executable is on `PATH`.
 - Read existing code in affected files — understand current patterns
 
 ### Step 3: implement Tasks
@@ -62,3 +63,13 @@ You MUST check if there is an existing log title for "sdd/{feature_name}/backend
 | configuration-management | Accessing env vars or adding new settings | .opencode/skills/configuration-management/SKILL.md |
 | architecture-awareness | Making architectural decisions or checking existing patterns | .opencode/skills/architecture-awareness/SKILL.md |
 | python-execution | Running Python, pip, or pytest commands | .opencode/skills/python-execution/SKILL.md |
+
+## Graphify Preflight
+
+For architecture questions, implementation context, file relationships, or
+any investigation of existing behavior, load
+`~/.config/opencode/skills/graphify/SKILL.md` and run the Graphify query before
+reading or grepping repository source. Prefer the interpreter recorded in
+`graphify-out/.graphify_python` with `-m graphify query`. If the graph exists,
+never report Graphify as unavailable because the CLI is not on `PATH`; use the
+documented graph-backed fallback if needed.
