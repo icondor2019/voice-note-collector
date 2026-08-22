@@ -29,6 +29,21 @@ from backend.services.multi_agent_service import MultiAgentService
 from backend.models.agent import AgentResult, MultiAgentResult
 
 
+def _make_llm_response(
+    reply: str = "",
+    fields: dict | None = None,
+    intention: str = "capture",
+) -> str:
+    """Build a JSON string that the LLM would return."""
+    if fields is None:
+        fields = {}
+    return json.dumps({
+        "reply": reply,
+        "fields": fields,
+        "intention": intention,
+    })
+
+
 # ── SourceUpdateRequest ──────────────────────────────────────────────────────
 
 
@@ -115,7 +130,7 @@ class TestCreateImmediatelyThenEnrich:
 
     @pytest.mark.anyio
     async def test_enrich_via_update_flow(self) -> None:
-        """After creation, /update starts enrichment, then user answers update the source."""
+        """After creation, /update starts enrichment, then LLM-driven apply updates the source."""
         agent = self._make_agent()
         await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
 
@@ -128,49 +143,26 @@ class TestCreateImmediatelyThenEnrich:
         }
         await agent.start_enrich_flow(1, active_source)
 
-        # Accept name
-        await agent.handle_response("yes", user_id=1)
-        # Provide author
-        await agent.handle_response("Javier Maza", user_id=1)
-        # Provide comment → shows confirmation summary
-        await agent.handle_response("Entrevista", user_id=1)
+        # LLM-driven: capture then apply
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Captured: Javier Maza, Entrevista",
+            fields={"author": "Javier Maza", "comment": "Entrevista"},
+            intention="capture",
+        ))
+        await agent.handle_response("author Javier Maza, comment Entrevista", user_id=1)
 
-        # Not yet applied — awaiting confirmation
+        # Not yet applied
         agent._source_service.update_source.assert_not_awaited()
 
-        # Confirm → triggers update
-        await agent.handle_response("confirm", user_id=1)
+        # Apply
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Saved!",
+            fields={"author": "Javier Maza", "comment": "Entrevista"},
+            intention="apply",
+        ))
+        await agent.handle_response("yes", user_id=1)
 
         # Verify update_source was called
-        agent._source_service.update_source.assert_awaited_once()
-        call_kwargs = agent._source_service.update_source.call_args
-        assert call_kwargs.kwargs.get("source_id") == "src-123" or call_kwargs[1].get("source_id") == "src-123"
-
-    @pytest.mark.anyio
-    async def test_name_override_updates_source(self) -> None:
-        """User can override the suggested name, which is then updated."""
-        agent = self._make_agent()
-        await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
-
-        active_source = {
-            "id": "src-123",
-            "source_name": "yt-youtube-watch",
-            "type": "youtube",
-            "url": "https://youtube.com/watch?v=abc",
-        }
-        await agent.start_enrich_flow(1, active_source)
-
-        # Override name
-        await agent.handle_response("yt-fin-aprendizaje", user_id=1)
-        # Provide author
-        await agent.handle_response("Javier Maza", user_id=1)
-        # Provide comment → shows confirmation
-        await agent.handle_response("Entrevista", user_id=1)
-
-        # Confirm → triggers update
-        await agent.handle_response("apply", user_id=1)
-
-        # Verify update was called with the new name
         agent._source_service.update_source.assert_awaited_once()
 
     @pytest.mark.anyio
@@ -210,7 +202,7 @@ class TestRoutingFix:
             source_type="youtube",
             url="https://youtube.com/watch?v=abc",
             source_id="src-123",
-            step=SourceCreateStep.AWAITING_NAME_CONFIRM,
+            step=SourceCreateStep.AWAITING_INPUT,
         )
         source_create_agent._pending[123] = ctx
 
@@ -331,10 +323,10 @@ class TestSystemPrompt:
         assert "wb-scaling-apis" in SOURCE_CREATE_SYSTEM_PROMPT
         assert "bk-parasitic-minds" in SOURCE_CREATE_SYSTEM_PROMPT
 
-    def test_prompt_contains_always_ask_rule(self) -> None:
-        assert "ALWAYS-ASK RULE" in SOURCE_CREATE_SYSTEM_PROMPT
-        assert "author" in SOURCE_CREATE_SYSTEM_PROMPT
-        assert "comment" in SOURCE_CREATE_SYSTEM_PROMPT
+    def test_prompt_contains_intention_based_instructions(self) -> None:
+        assert "intention" in SOURCE_CREATE_SYSTEM_PROMPT.lower()
+        assert "capture" in SOURCE_CREATE_SYSTEM_PROMPT
+        assert "apply" in SOURCE_CREATE_SYSTEM_PROMPT
 
     def test_prompt_contains_prefix_table(self) -> None:
         assert "yt-" in SOURCE_CREATE_SYSTEM_PROMPT
@@ -347,10 +339,11 @@ class TestSystemPrompt:
         assert "El Futuro del Aprendizaje" in SOURCE_CREATE_SYSTEM_PROMPT
         assert "WRONG" in SOURCE_CREATE_SYSTEM_PROMPT
 
-    def test_prompt_contains_update_action(self) -> None:
+    def test_prompt_contains_json_output_format(self) -> None:
         """Prompt must document the JSON output format."""
-        assert "update_source" in SOURCE_CREATE_SYSTEM_PROMPT
-        assert '"action"' in SOURCE_CREATE_SYSTEM_PROMPT
+        assert "intention" in SOURCE_CREATE_SYSTEM_PROMPT
+        assert "reply" in SOURCE_CREATE_SYSTEM_PROMPT
+        assert "fields" in SOURCE_CREATE_SYSTEM_PROMPT
 
 
 # ── JSON extraction ──────────────────────────────────────────────────────────
@@ -358,32 +351,32 @@ class TestSystemPrompt:
 
 class TestJsonExtraction:
     def test_extract_from_code_block(self) -> None:
-        text = """Here's the update:
+        text = """Here is the update:
 ```json
 {
-  "action": "update_source",
-  "source_name": "yt-fin-aprendizaje",
-  "author": "Javier Maza"
+  "reply": "hello",
+  "fields": {"source_name": "yt-fin-aprendizaje"},
+  "intention": "capture"
 }
 ```
 """
         result = _extract_json_block(text)
         assert result is not None
-        assert result["action"] == "update_source"
-        assert result["source_name"] == "yt-fin-aprendizaje"
+        assert result["intention"] == "capture"
+        assert result["fields"]["source_name"] == "yt-fin-aprendizaje"
 
     def test_extract_from_bare_json(self) -> None:
-        text = '{"action": "update_source", "source_name": "yt-test"}'
+        text = '{"reply": "hello", "fields": {}, "intention": "apply"}'
         result = _extract_json_block(text)
         assert result is not None
-        assert result["action"] == "update_source"
+        assert result["intention"] == "apply"
 
     def test_no_json_returns_none(self) -> None:
         text = "Just a regular text response without JSON."
         result = _extract_json_block(text)
         assert result is None
 
-    def test_json_without_action_returns_none(self) -> None:
+    def test_json_without_intention_or_action_returns_none(self) -> None:
         text = '{"source_name": "yt-test"}'
         result = _extract_json_block(text)
         assert result is None
@@ -453,18 +446,13 @@ class TestAgentWithLLM:
         assert call_kwargs.kwargs.get("reasoning_effort") == "medium" or call_kwargs[1].get("reasoning_effort") == "medium"
 
     @pytest.mark.anyio
-    async def test_llm_json_action_triggers_update(self) -> None:
-        """When LLM returns JSON with action=update_source, confirmation summary is shown."""
-        json_response = """Here's the confirmation:
-```json
-{
-  "action": "update_source",
-  "source_name": "yt-fin-aprendizaje",
-  "author": "Javier Maza",
-  "comment": "Entrevista sobre el fin del aprendizaje"
-}
-```
-"""
+    async def test_llm_json_capture_shows_summary(self) -> None:
+        """When LLM returns JSON with intention=capture, summary is shown."""
+        json_response = _make_llm_response(
+            reply="Here is what I captured: yt-fin-aprendizaje by Javier Maza",
+            fields={"source_name": "yt-fin-aprendizaje", "author": "Javier Maza", "comment": "Entrevista"},
+            intention="capture",
+        )
         agent = self._make_agent_with_llm(json_response)
         await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
         active_source = {
@@ -477,22 +465,20 @@ class TestAgentWithLLM:
 
         reply = await agent.handle_response("el video trata sobre el fin del aprendizaje", user_id=1)
 
-        # LLM JSON action transitions to confirmation (not immediate apply)
-        assert "Here's what I'll update" in reply
+        # LLM JSON with intention=capture shows summary (not immediate apply)
         assert "yt-fin-aprendizaje" in reply
         assert "Javier Maza" in reply
         agent._source_service.update_source.assert_not_awaited()
 
-        # Confirm → applies
-        reply = await agent.handle_response("confirm", user_id=1)
-        agent._source_service.update_source.assert_awaited_once()
-        assert "✅ Source updated" in reply
-
     @pytest.mark.anyio
-    async def test_llm_text_response_mid_conversation(self) -> None:
-        """When LLM returns plain text, it's passed through to the user."""
-        agent = self._make_agent_with_llm("👤 Who is the author? (or say 'skip')")
-        await agent.create_source_from_url("https://youtube.com/watch?v=abc", user_id=1)
+    async def test_llm_json_apply_triggers_update(self) -> None:
+        """When LLM returns JSON with intention=apply, update is triggered."""
+        json_response = _make_llm_response(
+            reply="Saved! We are now in note mode.",
+            fields={"author": "Javier Maza"},
+            intention="apply",
+        )
+        agent = self._make_agent_with_llm(json_response)
         active_source = {
             "id": "src-123",
             "source_name": "yt-youtube-watch",
@@ -503,10 +489,8 @@ class TestAgentWithLLM:
 
         reply = await agent.handle_response("yes", user_id=1)
 
-        # Should return the LLM's text response
-        assert "author" in reply.lower()
-        # update_source should NOT have been called
-        agent._source_service.update_source.assert_not_awaited()
+        agent._source_service.update_source.assert_awaited_once()
+        assert "We are now in note mode" in reply
 
 
 # ── /create flows ────────────────────────────────────────────────────────────
@@ -514,14 +498,14 @@ class TestAgentWithLLM:
 
 class TestCreateFlows:
     @pytest.mark.anyio
-    async def test_create_no_args_asks_type(self) -> None:
+    async def test_create_no_args_starts_open_ended(self) -> None:
         svc = AsyncMock()
         agent = SourceCreateAgent(source_service=svc)
         reply = await agent.start_create_flow(user_id=1)
-        assert "type" in reply.lower()
+        assert "create" in reply.lower()
         ctx = agent.get_pending_context(1)
         assert ctx is not None
-        assert ctx.step == SourceCreateStep.AWAITING_TYPE
+        assert ctx.step == SourceCreateStep.AWAITING_INPUT
 
     @pytest.mark.anyio
     async def test_create_with_url_delegates_to_deterministic_creation(self) -> None:

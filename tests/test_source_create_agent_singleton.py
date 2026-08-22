@@ -92,7 +92,7 @@ class TestSingletonPreservesPendingContext:
         user_id = 12345
         agent_request_1._pending[user_id] = {
             "source_id": "src-abc",
-            "step": "AWAITING_NAME_CONFIRM",
+            "step": "AWAITING_INPUT",
             "source_name": "yt-test-video",
             "type": "youtube",
             "url": "https://youtube.com/watch?v=test",
@@ -105,7 +105,7 @@ class TestSingletonPreservesPendingContext:
         ctx = agent_request_2.get_pending_context(user_id)
         assert ctx is not None
         assert ctx["source_id"] == "src-abc"
-        assert ctx["step"] == "AWAITING_NAME_CONFIRM"
+        assert ctx["step"] == "AWAITING_INPUT"
 
     def test_clear_pending_works_on_singleton(self) -> None:
         """clear_pending on one reference affects the singleton."""
@@ -127,8 +127,8 @@ class TestSingletonPreservesPendingContext:
         mock_source_service = AsyncMock()
 
         agent = get_source_create_agent(source_service=mock_source_service)
-        agent._pending[1] = {"source_id": "src-1", "step": "AWAITING_NAME_CONFIRM"}
-        agent._pending[2] = {"source_id": "src-2", "step": "AWAITING_AUTHOR"}
+        agent._pending[1] = {"source_id": "src-1", "step": "AWAITING_INPUT"}
+        agent._pending[2] = {"source_id": "src-2", "step": "AWAITING_INPUT"}
 
         # Get a fresh reference (same instance)
         agent2 = get_source_create_agent(source_service=mock_source_service)

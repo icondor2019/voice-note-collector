@@ -229,7 +229,8 @@ class TestUpdateCommand:
         handler = _build_command_handler()
         reply = await handler.handle_text("/update", chat_id=123, from_user_id=456)
         assert "yt-youtube-watch" in reply
-        assert "Would you like to keep it or change it" in reply
+        # New open-ended prompt
+        assert "update" in reply.lower() or "tell me" in reply.lower()
 
     @pytest.mark.anyio
     async def test_update_no_active_source_returns_error(self) -> None:
@@ -256,7 +257,7 @@ class TestUpdateCommand:
         await handler.handle_text("/update", chat_id=123, from_user_id=456)
         ctx = agent.get_pending_context(456)
         assert ctx is not None
-        assert ctx.step == SourceCreateStep.AWAITING_NAME_CONFIRM
+        assert ctx.step == SourceCreateStep.AWAITING_INPUT
         assert ctx.source_id == "src-123"
 
     @pytest.mark.anyio
@@ -266,7 +267,7 @@ class TestUpdateCommand:
         # Set stale context from abandoned /create flow
         stale_ctx = SourceCreateContext(
             source_type="thought",
-            step=SourceCreateStep.AWAITING_TYPE,
+            step=SourceCreateStep.AWAITING_INPUT,
         )
         agent._pending[456] = stale_ctx
         handler = _build_command_handler(source_create_agent=agent)
@@ -335,7 +336,7 @@ class TestEnrichFlowSourceAgnostic:
 
     @pytest.mark.anyio
     async def test_enrich_with_existing_metadata(self) -> None:
-        """Verify works when source already has author/comment set (re-asks)."""
+        """Verify works when source already has author/comment set."""
         agent = _make_agent_with_mock_service()
         source = {
             "id": "src-4",
@@ -348,9 +349,9 @@ class TestEnrichFlowSourceAgnostic:
         reply = await agent.start_enrich_flow(1, source)
         ctx = agent.get_pending_context(1)
         assert ctx is not None
-        assert ctx.step == SourceCreateStep.AWAITING_NAME_CONFIRM
-        # Still asks for name override (always-ask rule)
-        assert "Would you like to keep it or change it" in reply
+        assert ctx.step == SourceCreateStep.AWAITING_INPUT
+        # New open-ended prompt
+        assert "update" in reply.lower() or "tell me" in reply.lower()
 
     @pytest.mark.anyio
     async def test_enrich_clears_existing_pending(self) -> None:
@@ -358,7 +359,7 @@ class TestEnrichFlowSourceAgnostic:
         # Pre-existing pending context
         old_ctx = SourceCreateContext(
             source_type="thought",
-            step=SourceCreateStep.AWAITING_TYPE,
+            step=SourceCreateStep.AWAITING_INPUT,
         )
         agent._pending[1] = old_ctx
         source = {
@@ -448,10 +449,10 @@ class TestExistingFlowsPreserved:
         agent = _make_agent_with_mock_service()
         handler = _build_command_handler(source_create_agent=agent)
         reply = await handler.handle_text("/create", chat_id=123, from_user_id=456)
-        assert "type" in reply.lower() or "create" in reply.lower()
+        assert "create" in reply.lower()
         ctx = agent.get_pending_context(456)
         assert ctx is not None
-        assert ctx.step == SourceCreateStep.AWAITING_TYPE
+        assert ctx.step == SourceCreateStep.AWAITING_INPUT
 
     @pytest.mark.anyio
     async def test_create_name_still_name_based(self) -> None:

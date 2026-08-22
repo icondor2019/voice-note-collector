@@ -39,14 +39,20 @@ _TYPE_PREFIX_MAP: dict[str, str] = {
 # --------------------------------------------------------------------------- #
 
 SOURCE_CREATE_SYSTEM_PROMPT = """You are a source creation assistant for a voice-note knowledge base app.
-Your job is to help the user create and enrich sources by collecting information
-through conversation.
+Your job is to help the user create and enrich sources by understanding their
+INTENTION from each message — not by asking one-by-one questions.
 
-## CRITICAL: Source Creation Is Mandatory
-When a URL is detected, the source is ALREADY CREATED in the database with an
-auto-generated name and type. Your job is to ENRICH it: ask the user if they
-want to change the name, and collect author and comment. You are NOT deciding
-whether to create — it is already done. You are completing the information.
+## CRITICAL: Intention-Based, Multilingual, First-Interaction Capture
+- Capture ALL available information from the user's FIRST message (name, type, author, comment).
+- Do NOT ask for fields one at a time. Show what you understood in a summary.
+- Understand INTENTION from the message content, not from keywords.
+- Support Spanish, English, and mixed-language messages naturally.
+- If the user says anything indicating approval — in any language — save immediately.
+  Examples: "si", "claro", "dale", "guarda", "go ahead", "looks good", "that's all",
+  "no I don't care just save it", "si, apply it", "claro, go ahead", "dale, guardalo".
+- NEVER ask the user to say 'skip'. If a field is not mentioned, leave it as null.
+- You may SUGGEST refinements (e.g., "I suggest the name bk-parasitic-minds") but only
+  as notes within the summary, not as blocking questions.
 
 ## Source Naming Convention (STRICT)
 Every source name MUST follow this format:
@@ -113,88 +119,88 @@ Only proceed after the user confirms a canonical type. Never write an invalid ty
 6. NEVER suggest a full title or sentence as the name. "El Futuro del Aprendizaje" is WRONG.
    "yt-fin-aprendizaje" is RIGHT.
 
-## ALWAYS-ASK RULE (CRITICAL)
-You MUST always ask the user for ALL of these fields, even though they are optional:
-1. source_name — suggest one, but ask if the user wants a different name
-2. author — you MUST ask, even though the user can decline
-3. comment — you MUST ask, even though the user can decline
+## Intention Values
+You must ALWAYS respond with a JSON block containing these three fields:
 
-"Optional" means the user can leave it empty — it does NOT mean you can skip asking.
-If the user says "skip", "none", "no", or "n/a", accept it and move on.
+1. **"reply"**: The user-facing message (can be multi-line, any language).
+2. **"fields"**: Parsed field values from the user's message. Set to `null` for fields
+   the user did NOT mention. NEVER invent values. Fields: source_name, type, author, comment.
+3. **"intention"**: One of:
+   - **"capture"**: You parsed fields from the user's message. Show a summary of what you
+     understood. Suggest refinements as notes. Stay in awaiting_input.
+   - **"apply"**: The user approved (in any language). Save immediately with whatever you
+     understood. Transition to complete.
+   - **"ask"**: The user's message was ambiguous or contained no useful info. Ask a
+     clarifying question. Stay in awaiting_input.
 
-## Conversation Flow (URL trigger — source already created)
-1. The system tells you the source was created with: {name}, {type}, {url}.
-2. Tell the user: "✅ Source created: {name} ({type}). I suggested the name above.
-   Would you like to keep it or change it?"
-3. If the user provides a new name: validate it has a valid prefix, update the source.
-4. Ask: "👤 Who is the author? (or say 'skip')"
-5. Ask: "💬 Any comment about this source? (or say 'skip')"
-6. After collecting name, author, and comment, DO NOT apply changes immediately.
-   Show a confirmation summary (see Confirmation Flow below).
-
-## Conversation Flow (/create — no URL)
-1. Ask: "What type of source? (youtube, instagram, facebook, linkedin, web, book,
-   course, thought, test, other) — or paste a URL."
-2. Once you know the type, suggest a name and ask if the user wants to keep it.
-3. Ask for author (always).
-4. Ask for comment (always).
-5. After collecting all fields, show a confirmation summary (see Confirmation Flow below).
-
-## Confirmation Flow (CRITICAL — replaces auto-apply)
-After collecting name, author, and comment, do NOT apply changes immediately.
-Instead, show a summary of ALL fields (including empty ones) and ask:
-"Anything else to add, or shall I apply these changes?"
-
-Example summary:
-"Here's what I'll update:
-📝 Name: yt-scaling-apis
-📎 Type: youtube
-🔗 URL: https://youtube.com/watch?v=abc
-👤 Author: John Doe
-💬 Comment: (empty)
-
-Anything else to add, or shall I apply these changes?"
-
-Apply ONLY on:
-- Clear affirmative: 'confirm', 'correct', 'go ahead', 'yes', 'apply', 'that's all', 'looks good'
-- 'no, that's all' or 'no, apply' as answer to the "anything else?" prompt
-
-If the user provides a correction or additional information (e.g., "author: Jane",
-"actually the type is course"), update the field(s), rebuild the summary, and re-ask.
-
-If the user says a bare ambiguous 'no' without context, ask for clarification:
-"Just to confirm — do you mean 'no, that's all, apply' or 'no, I want to change something'?"
-
-On apply, say: "We are now in note mode." Do NOT mention what the next audio will do.
-
-## Output Format
-When you have collected all information and the user has confirmed, respond with a
-JSON block so the system can parse it:
+## Output Format (CRITICAL — ALWAYS return this JSON structure)
+You MUST ALWAYS respond with a JSON block in this exact format:
 ```json
 {
-  "action": "update_source",
-  "source_name": "yt-fin-aprendizaje",
-  "type": "youtube",
-  "author": "Javier Maza",
-  "comment": "Entrevista sobre el fin del aprendizaje"
+  "reply": "Here is what I understood:\nName: bk-parasitic-minds\nAuthor: Pablo Malo\n\nDoes this look right?",
+  "fields": {
+    "source_name": "bk-parasitic-minds",
+    "type": "book",
+    "author": "Pablo Malo",
+    "comment": null
+  },
+  "intention": "capture"
 }
 ```
-If the user is just answering a question mid-conversation, respond naturally in
-text — do NOT output JSON until you have all the information and the user has confirmed.
+
+### Examples by intention:
+
+**intention: "capture"** (user provided info, show summary):
+```json
+{
+  "reply": "Here's what I captured:\n📝 Name: yt-fin-aprendizaje\n👤 Author: Javier Maza\n💬 Comment: Entrevista sobre el fin del aprendizaje\n\nDoes this look right? Say 'yes' to save, or tell me what to change.",
+  "fields": {
+    "source_name": "yt-fin-aprendizaje",
+    "type": "youtube",
+    "author": "Javier Maza",
+    "comment": "Entrevista sobre el fin del aprendizaje"
+  },
+  "intention": "capture"
+}
+```
+
+**intention: "apply"** (user approved, save immediately):
+```json
+{
+  "reply": "✅ Saved! We are now in note mode.",
+  "fields": {
+    "source_name": "yt-fin-aprendizaje",
+    "type": "youtube",
+    "author": "Javier Maza",
+    "comment": "Entrevista sobre el fin del aprendizaje"
+  },
+  "intention": "apply"
+}
+```
+
+**intention: "ask"** (ambiguous, ask clarifying question):
+```json
+{
+  "reply": "What would you like to update? You can change the name, author, comment, or type.",
+  "fields": {
+    "source_name": null,
+    "type": null,
+    "author": null,
+    "comment": null
+  },
+  "intention": "ask"
+}
+```
+
+On apply, the reply should include "We are now in note mode." Do NOT mention what the next audio will do.
 """
 
 
 class SourceCreateStep(str, Enum):
     """Steps in the source creation conversation."""
 
-    AWAITING_NAME_CONFIRM = "awaiting_name_confirm"
-    AWAITING_AUTHOR = "awaiting_author"
-    AWAITING_COMMENT = "awaiting_comment"
-    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    AWAITING_INPUT = "awaiting_input"
     COMPLETE = "complete"
-    # For /create flows (no URL)
-    AWAITING_TYPE = "awaiting_type"
-    AWAITING_NAME = "awaiting_name"
 
 
 class SourceCreateContext:
@@ -210,7 +216,7 @@ class SourceCreateContext:
         author: Optional[str] = None,
         comment: Optional[str] = None,
         type: Optional[str] = None,
-        step: SourceCreateStep = SourceCreateStep.AWAITING_NAME_CONFIRM,
+        step: SourceCreateStep = SourceCreateStep.AWAITING_INPUT,
         conversation_history: Optional[list[dict[str, str]]] = None,
         flow: str = "enrich",
     ) -> None:
@@ -243,6 +249,14 @@ class SourceCreateContext:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SourceCreateContext":
+        raw_step = data.get("step", "awaiting_input")
+        try:
+            step = SourceCreateStep(raw_step)
+        except ValueError:
+            # Old step values (e.g. "awaiting_name_confirm", "awaiting_type") are
+            # no longer valid — fall back to AWAITING_INPUT so the conversation
+            # can continue.
+            step = SourceCreateStep.AWAITING_INPUT
         return cls(
             source_type=data["source_type"],
             url=data.get("url"),
@@ -252,7 +266,7 @@ class SourceCreateContext:
             author=data.get("author"),
             comment=data.get("comment"),
             type=data.get("type"),
-            step=SourceCreateStep(data.get("step", "awaiting_name_confirm")),
+            step=step,
             conversation_history=data.get("conversation_history", []),
             flow=data.get("flow", "enrich"),
         )
@@ -310,7 +324,8 @@ def _suggest_source_name(source_type: str, url: Optional[str] = None) -> str:
 def _extract_json_block(text: str) -> Optional[dict[str, Any]]:
     """Extract a JSON block from LLM response text.
 
-    Looks for ```json ... ``` or bare JSON with "action" key.
+    Looks for ```json ... ``` or bare JSON with "intention" or "action" key.
+    Handles nested JSON objects (e.g. fields dict inside the top-level object).
     """
     # Try ```json ... ``` first
     json_match = re.search(r"```json\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
@@ -320,15 +335,39 @@ def _extract_json_block(text: str) -> Optional[dict[str, Any]]:
         except json.JSONDecodeError:
             pass
 
-    # Try bare JSON object
-    json_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
-    if json_match:
-        try:
-            parsed = json.loads(json_match.group(0))
-            if isinstance(parsed, dict) and "action" in parsed:
-                return parsed
-        except json.JSONDecodeError:
-            pass
+    # Try bare JSON object — use a brace-counting approach for nested objects
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(text[start : i + 1])
+                        if isinstance(parsed, dict) and (
+                            "intention" in parsed or "action" in parsed
+                        ):
+                            return parsed
+                    except json.JSONDecodeError:
+                        pass
+                    break
 
     return None
 
@@ -474,7 +513,7 @@ class SourceCreateAgent:
             author=author,
             comment=comment,
             type=source_type,
-            step=SourceCreateStep.AWAITING_NAME_CONFIRM,
+            step=SourceCreateStep.AWAITING_INPUT,
             flow="enrich",
         )
         # Seed conversation history with the source's CURRENT state
@@ -485,9 +524,9 @@ class SourceCreateAgent:
                     f"The active source has: name={source_name}, "
                     f"type={source_type}, url={url or 'N/A'}, source_id={source_id}, "
                     f"author={author or 'not set'}, comment={comment or 'not set'}. "
-                    f"Enrich it by asking the user for name override, author, and comment. "
-                    f"After collecting all fields, show a confirmation summary and wait "
-                    f"for explicit confirmation before applying."
+                    f"The user wants to enrich this source. Capture all information "
+                    f"from the user's first message and show what you understood. "
+                    f"Save immediately on any approval signal in any language."
                 ),
             }
         )
@@ -495,7 +534,7 @@ class SourceCreateAgent:
 
         return (
             f"📂 Active source: {source_name} ({source_type}).\n\n"
-            f"I suggested the name above. Would you like to keep it or change it?"
+            f"Tell me what you'd like to update — name, author, comment, or anything else."
         )
 
     # ------------------------------------------------------------------ #
@@ -558,15 +597,14 @@ class SourceCreateAgent:
         # No argument — start guided flow
         ctx = SourceCreateContext(
             source_type="thought",
-            step=SourceCreateStep.AWAITING_TYPE,
+            step=SourceCreateStep.AWAITING_INPUT,
             flow="create",
         )
         self._pending[user_id] = ctx
         return (
             "Let's create a new source!\n\n"
-            "What type of source is this?\n"
-            f"({', '.join(sorted(VALID_SOURCE_TYPES))})\n\n"
-            "Or paste a URL to create a source from it."
+            "Tell me about it — what type, name, author, and any comment. "
+            "You can describe it in your own words, in any language."
         )
 
     # ------------------------------------------------------------------ #
@@ -576,8 +614,9 @@ class SourceCreateAgent:
     async def handle_response(self, user_message: str, user_id: int) -> str:
         """Process the user's responses in the source creation conversation.
 
-        v2: Uses LLM to drive the conversation. Parses JSON output for
-        update_source actions.
+        All messages go through the LLM (intention-based). The only exception
+        is URL-only messages during /create guided flow, which are handled
+        deterministically before the LLM call.
         """
         ctx = self._pending.get(user_id)
         if ctx is None:
@@ -585,15 +624,12 @@ class SourceCreateAgent:
 
         text = user_message.strip()
 
-        # For /create flows without URL, handle the state machine steps first
-        if ctx.step == SourceCreateStep.AWAITING_TYPE:
-            return await self._handle_type_step(text, user_id, ctx)
+        # Pre-LLM URL-only check: create flow + URL-only message → deterministic creation
+        if ctx.flow == "create" and UrlDetectorService.is_url(text):
+            url = UrlDetectorService.extract_url(text)
+            self.clear_pending(user_id)
+            return await self.create_source_from_url(url, user_id)
 
-        # Confirmation step: handle locally (no LLM call) to avoid ambiguity
-        if ctx.step == SourceCreateStep.AWAITING_CONFIRMATION:
-            return await self._handle_confirmation_step(text, user_id, ctx)
-
-        # For URL-triggered flow or /create with name: use LLM-driven conversation
         # Add user message to conversation history
         ctx.conversation_history.append({"role": "user", "content": text})
 
@@ -604,78 +640,42 @@ class SourceCreateAgent:
         llm_response = self._call_llm(llm_messages)
 
         if not llm_response:
-            # LLM failed — fall back to state machine
-            return await self._fallback_handle(text, user_id, ctx)
+            # LLM failed — graceful error, keep context alive for retry
+            return "I'm having trouble processing that. Could you try again?"
 
-        # Check if LLM response contains a JSON action block
-        action = _extract_json_block(llm_response)
+        # Parse JSON from LLM response
+        parsed = _extract_json_block(llm_response)
 
-        if action and action.get("action") == "update_source":
-            return await self._handle_update_action(action, user_id, ctx)
+        if not parsed or "intention" not in parsed:
+            # No valid JSON or missing intention key — graceful error
+            return "I'm having trouble processing that. Could you try again?"
 
-        if action and action.get("action") == "create_source":
-            return await self._handle_create_action(action, user_id, ctx)
-
-        # Mid-conversation: update context with any info from the user message
-        # and return the LLM's text response
-        self._update_context_from_user_input(ctx, text)
-
-        # Add assistant response to history
-        ctx.conversation_history.append({"role": "assistant", "content": llm_response})
-
-        return llm_response
+        return await self._handle_llm_response(parsed, user_id, ctx)
 
     # ------------------------------------------------------------------ #
     #  Internal helpers
     # ------------------------------------------------------------------ #
 
-    async def _handle_type_step(
-        self, text: str, user_id: int, ctx: SourceCreateContext
+    async def _handle_llm_response(
+        self, parsed: dict[str, Any], user_id: int, ctx: SourceCreateContext
     ) -> str:
-        """Handle the type selection step for /create flows."""
-        # Check if user pasted a URL instead of selecting a type
-        if UrlDetectorService.is_url(text):
-            url = UrlDetectorService.extract_url(text)
-            # Delegate to deterministic URL creation
-            self.clear_pending(user_id)
-            return await self.create_source_from_url(url, user_id)
+        """Handle the LLM's structured JSON response.
 
-        if text.lower() in VALID_SOURCE_TYPES:
-            ctx.source_type = text.lower()
-            prefix = _TYPE_PREFIX_MAP.get(ctx.source_type, "wb")
-
-            if ctx.source_name:
-                # Name was pre-filled via /create <name>
-                ctx.step = SourceCreateStep.AWAITING_AUTHOR
-                return "👤 Who is the author? (or say 'skip' to leave empty)"
-            else:
-                # Ask for name
-                suggested = f"{prefix}-new-source"
-                ctx.suggested_name = suggested
-                ctx.step = SourceCreateStep.AWAITING_NAME
-                return (
-                    f"📝 Great! Suggested name: {suggested}\n\n"
-                    f"Do you want to use this name, or provide a different one?"
-                )
-
-        return (
-            f"❌ Invalid type. Please choose from:\n"
-            f"{', '.join(sorted(VALID_SOURCE_TYPES))}\n\n"
-            f"Or paste a URL to create a source from it."
-        )
-
-    async def _handle_update_action(
-        self, action: dict[str, Any], user_id: int, ctx: SourceCreateContext
-    ) -> str:
-        """Handle the LLM's JSON output to update the source.
-
-        Instead of applying immediately, extract fields into context and
-        transition to AWAITING_CONFIRMATION to show a summary first.
+        Extracts reply, fields, and intention. Validates field values.
+        Routes by intention: apply → persist, capture/ask → show reply.
         """
-        new_name = action.get("source_name")
-        new_author = action.get("author")
-        new_comment = action.get("comment")
-        new_type = action.get("type")
+        reply = parsed.get("reply", "")
+        fields = parsed.get("fields", {})
+        intention = parsed.get("intention", "")
+
+        if not isinstance(fields, dict):
+            fields = {}
+
+        # Extract field values (null means user didn't mention)
+        new_name = fields.get("source_name")
+        new_type = fields.get("type")
+        new_author = fields.get("author")
+        new_comment = fields.get("comment")
 
         # Validate name prefix if provided
         if new_name:
@@ -694,151 +694,27 @@ class SourceCreateAgent:
                 f"Must be one of: {', '.join(sorted(VALID_SOURCE_TYPES))}"
             )
 
-        # Update context with proposed values (don't apply yet)
+        # Update context with any non-null fields
         if new_name is not None:
             ctx.source_name = new_name
+        if new_type is not None:
+            ctx.type = new_type
         if new_author is not None:
             ctx.author = new_author
         if new_comment is not None:
             ctx.comment = new_comment
-        if new_type is not None:
-            ctx.type = new_type
 
-        # Transition to confirmation step
-        ctx.step = SourceCreateStep.AWAITING_CONFIRMATION
-        return self._build_confirmation_summary(ctx)
-
-    def _build_confirmation_summary(self, ctx: SourceCreateContext) -> str:
-        """Build a confirmation summary showing all proposed changes.
-
-        Shows all fields including empty ones with '(empty)' placeholder.
-        Ends with a prompt asking if anything else should be added.
-        """
-        name = ctx.source_name or ctx.suggested_name or "(empty)"
-        source_type = ctx.type or ctx.source_type or "(empty)"
-        url = ctx.url or "(empty)"
-        author = ctx.author or "(empty)"
-        comment = ctx.comment or "(empty)"
-
-        return (
-            f"Here's what I'll update:\n"
-            f"📝 Name: {name}\n"
-            f"📎 Type: {source_type}\n"
-            f"🔗 URL: {url}\n"
-            f"👤 Author: {author}\n"
-            f"💬 Comment: {comment}\n\n"
-            f"Anything else to add, or shall I apply these changes?"
-        )
-
-    async def _handle_confirmation_step(
-        self, text: str, user_id: int, ctx: SourceCreateContext
-    ) -> str:
-        """Handle the user's response during the confirmation step.
-
-        Detects:
-        - Clear affirmative → apply changes
-        - 'no, that's all' → apply changes
-        - Correction/addition → update field, rebuild summary, re-ask
-        - Ambiguous 'no' → ask for clarification
-        """
-        text_lower = text.lower().strip()
-
-        # Dispatch based on flow marker: create vs enrich
-        async def _apply_or_create() -> str:
+        # Route by intention
+        if intention == "apply":
             if ctx.flow == "create":
-                return await self._create_source_from_context(user_id, ctx)
-            return await self._apply_enrichment(user_id, ctx)
+                result = await self._create_source_from_context(user_id, ctx)
+            else:
+                result = await self._apply_enrichment(user_id, ctx)
+            return result
 
-        # Clear affirmative responses
-        affirmative = {
-            "confirm", "correct", "go ahead", "yes", "apply", "that's all",
-            "looks good", "ok", "sure", "yep", "y", "please do", "do it",
-            "apply it", "apply changes", "save", "save it",
-        }
-        if text_lower in affirmative:
-            return await _apply_or_create()
-
-        # "no, that's all" variants — clear answer to "anything else?"
-        no_thats_all = {
-            "no, that's all", "no that's all", "no, thats all", "no thats all",
-            "no, apply", "no apply", "nothing else", "nope, that's all",
-            "nope, apply", "no, go ahead", "no, go ahead and apply",
-        }
-        if text_lower in no_thats_all:
-            return await _apply_or_create()
-
-        # Check for corrections/additions (e.g., "author: Jane", "the type is course")
-        correction = self._extract_correction(text, ctx)
-        if correction:
-            return self._build_confirmation_summary(ctx)
-
-        # Ambiguous bare "no" — ask for clarification
-        if text_lower in ("no", "nope", "nah"):
-            return (
-                "Just to confirm — do you mean 'no, that's all, apply' "
-                "or 'no, I want to change something'?"
-            )
-
-        # Anything else — treat as potential correction or additional info
-        # Try to extract field updates from the text
-        correction = self._extract_correction(text, ctx)
-        if correction:
-            return self._build_confirmation_summary(ctx)
-
-        # If we can't parse it, ask for clarification
-        return (
-            "I'm not sure if you want to apply the changes or modify something. "
-            "Say 'apply' to save, or tell me what you'd like to change."
-        )
-
-    def _extract_correction(self, text: str, ctx: SourceCreateContext) -> bool:
-        """Try to extract field corrections from user text.
-
-        Returns True if a correction was found and applied to ctx.
-        """
-        import re
-
-        # Pattern: "field: value" or "field is value"
-        # Use original text for value extraction (preserve case)
-        # author: Jane
-        author_match = re.search(r"(?:author|written by|by)\s*[:=]\s*(.+)", text, re.IGNORECASE)
-        if author_match:
-            ctx.author = author_match.group(1).strip()
-            return True
-
-        # comment: some comment
-        comment_match = re.search(r"(?:comment|note|description)\s*[:=]\s*(.+)", text, re.IGNORECASE)
-        if comment_match:
-            ctx.comment = comment_match.group(1).strip()
-            return True
-
-        # type: course
-        type_match = re.search(r"(?:type|category)\s*[:=]\s*(.+)", text, re.IGNORECASE)
-        if type_match:
-            new_type = type_match.group(1).strip().lower()
-            if new_type in VALID_SOURCE_TYPES:
-                ctx.type = new_type
-                # Re-derive name prefix if name exists
-                if ctx.source_name:
-                    prefix = _TYPE_PREFIX_MAP.get(new_type, "wb")
-                    # Replace existing prefix
-                    for old_prefix in VALID_PREFIXES:
-                        if ctx.source_name.startswith(old_prefix):
-                            ctx.source_name = f"{prefix}-{ctx.source_name[len(old_prefix):]}"
-                            break
-                return True
-
-        # name: new-name
-        name_match = re.search(r"(?:name|rename)\s*[:=]\s*(.+)", text, re.IGNORECASE)
-        if name_match:
-            new_name = name_match.group(1).strip()
-            slug = slugify(new_name)
-            has_prefix = any(slug.startswith(p) for p in VALID_PREFIXES)
-            if has_prefix:
-                ctx.source_name = slug
-                return True
-
-        return False
+        # intention == "capture" or "ask" — show reply, stay in AWAITING_INPUT
+        ctx.conversation_history.append({"role": "assistant", "content": reply})
+        return reply
 
     async def _apply_enrichment(self, user_id: int, ctx: SourceCreateContext) -> str:
         """Apply the staged enrichment changes to the source.
@@ -918,7 +794,7 @@ class SourceCreateAgent:
     ) -> str:
         """Create a new source from the collected context (guided /create flow).
 
-        Called by _handle_confirmation_step() when ctx.flow == "create".
+        Called by _handle_llm_response() when intention == "apply" and ctx.flow == "create".
         Extracts name, type, author, comment, and optional URL from the
         context, creates the source, activates it, clears pending context,
         and returns a creation confirmation message.
@@ -978,57 +854,6 @@ class SourceCreateAgent:
             self.clear_pending(user_id)
             return "❌ Failed to create source. Please try again with /create."
 
-    async def _handle_create_action(
-        self, action: dict[str, Any], user_id: int, ctx: SourceCreateContext
-    ) -> str:
-        """Handle the LLM's JSON output to create a new source (/create flow)."""
-        source_name = action.get("source_name") or ctx.source_name or ctx.suggested_name
-        source_type = action.get("type") or ctx.source_type
-        author = action.get("author") or ctx.author
-        comment = action.get("comment") or ctx.comment
-
-        if not source_name:
-            return "❌ Missing source name. Please try again with /create."
-
-        # Validate name prefix
-        has_prefix = any(source_name.startswith(p) for p in VALID_PREFIXES)
-        if not has_prefix:
-            return (
-                f"❌ Source name must start with a type prefix.\n"
-                f"Valid prefixes: {', '.join(VALID_PREFIXES)}"
-            )
-
-        try:
-            source = await self._source_service.create_source_and_optionally_activate(
-                source_name=source_name,
-                author=author,
-                comment=comment,
-                activate=True,
-                url=ctx.url,
-                type=source_type,
-            )
-            self.clear_pending(user_id)
-            logger.info(
-                "source_create_agent.created",
-                extra={"source_name": source_name, "type": source_type},
-            )
-            return (
-                f"✅ Source \"{source_name}\" created and activated!\n"
-                f"📎 Type: {source_type}\n"
-                f"🔗 URL: {ctx.url or 'N/A'}\n"
-                f"👤 Author: {author or 'N/A'}\n"
-                f"💬 Comment: {comment or 'N/A'}"
-            )
-        except ValueError as exc:
-            self.clear_pending(user_id)
-            return f"❌ {exc}"
-        except Exception as exc:
-            logger.error(
-                "source_create_agent.create_failed",
-                extra={"error": str(exc)},
-            )
-            return "❌ Failed to create source. Please try again with /create."
-
     def _build_llm_messages(self, ctx: SourceCreateContext) -> list[dict[str, str]]:
         """Build the messages list for the LLM call."""
         messages: list[dict[str, str]] = [
@@ -1046,6 +871,7 @@ class SourceCreateAgent:
             f"- author: {ctx.author or 'not provided yet'}\n"
             f"- comment: {ctx.comment or 'not provided yet'}\n"
             f"- step: {ctx.step.value}\n"
+            f"- flow: {ctx.flow}\n"
         )
         messages.append({"role": "system", "content": source_info})
 
@@ -1055,85 +881,6 @@ class SourceCreateAgent:
 
         return messages
 
-    def _update_context_from_user_input(self, ctx: SourceCreateContext, text: str) -> None:
-        """Try to extract useful info from the user's message into the context."""
-        text_lower = text.lower().strip()
-
-        # Check for skip/decline
-        is_skip = text_lower in ("skip", "none", "no", "n/a", "-", "no thanks", "nah")
-
-        # Check if user is accepting the suggested name
-        if ctx.step == SourceCreateStep.AWAITING_NAME_CONFIRM:
-            if text_lower in ("yes", "y", "ok", "sure", "accept", "keep it", "fine", "good"):
-                ctx.source_name = ctx.suggested_name
-                ctx.step = SourceCreateStep.AWAITING_AUTHOR
-            elif not is_skip:
-                # User might be providing a new name
-                slug = slugify(text)
-                has_prefix = any(slug.startswith(p) for p in VALID_PREFIXES)
-                if has_prefix:
-                    ctx.source_name = slug
-                    ctx.step = SourceCreateStep.AWAITING_AUTHOR
-                # Otherwise, the LLM will handle the response
-        elif ctx.step == SourceCreateStep.AWAITING_AUTHOR:
-            if not is_skip:
-                ctx.author = text
-                ctx.step = SourceCreateStep.AWAITING_COMMENT
-            else:
-                ctx.step = SourceCreateStep.AWAITING_COMMENT
-        elif ctx.step == SourceCreateStep.AWAITING_COMMENT:
-            if not is_skip:
-                ctx.comment = text
-
-    async def _fallback_handle(
-        self, text: str, user_id: int, ctx: SourceCreateContext
-    ) -> str:
-        """Fallback state machine when LLM is unavailable."""
-        is_skip = text.lower().strip() in ("skip", "none", "no", "n/a", "-")
-
-        if ctx.step == SourceCreateStep.AWAITING_NAME:
-            # User is providing a name (no suggestion was made yet)
-            slug = slugify(text)
-            has_prefix = any(slug.startswith(p) for p in VALID_PREFIXES)
-            if has_prefix:
-                ctx.source_name = slug
-                ctx.step = SourceCreateStep.AWAITING_AUTHOR
-                return "👤 Who is the author? (or say 'skip' to leave empty)"
-            return (
-                f"❌ Source name must start with a type prefix.\n"
-                f"Valid prefixes: {', '.join(VALID_PREFIXES)}\n"
-                f"Try again."
-            )
-
-        if ctx.step == SourceCreateStep.AWAITING_NAME_CONFIRM:
-            if text.lower().strip() in ("yes", "y", "ok", "sure", "accept"):
-                ctx.source_name = ctx.suggested_name
-                ctx.step = SourceCreateStep.AWAITING_AUTHOR
-                return "👤 Who is the author? (or say 'skip' to leave empty)"
-            else:
-                slug = slugify(text)
-                has_prefix = any(slug.startswith(p) for p in VALID_PREFIXES)
-                if has_prefix:
-                    ctx.source_name = slug
-                    ctx.step = SourceCreateStep.AWAITING_AUTHOR
-                    return "👤 Who is the author? (or say 'skip' to leave empty)"
-                return (
-                    f"❌ Source name must start with a type prefix.\n"
-                    f"Valid prefixes: {', '.join(VALID_PREFIXES)}\n"
-                    f"Try again or say 'yes' to use the suggested name."
-                )
-
-        elif ctx.step == SourceCreateStep.AWAITING_AUTHOR:
-            if not is_skip:
-                ctx.author = text
-            ctx.step = SourceCreateStep.AWAITING_COMMENT
-            return "💬 Any comment about this source? (or say 'skip' to leave empty)"
-
-        elif ctx.step == SourceCreateStep.AWAITING_COMMENT:
-            if not is_skip:
-                ctx.comment = text
-            # Transition to confirmation instead of auto-applying
-            ctx.step = SourceCreateStep.AWAITING_CONFIRMATION
-            return self._build_confirmation_summary(ctx)
-
-        return "Please use /create to start a new source creation."
+    # TODO: Fall back to another LLM provider in a future session. The deterministic
+    # keyword-matching fallback was removed in favor of always-probabilistic LLM-driven
+    # interaction.

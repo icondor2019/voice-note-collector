@@ -16,6 +16,7 @@ Covers:
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -82,6 +83,21 @@ def _make_agent_with_mock_service_no_active() -> SourceCreateAgent:
         }
     )
     return SourceCreateAgent(source_service=svc)
+
+
+def _make_llm_response(
+    reply: str = "",
+    fields: dict | None = None,
+    intention: str = "capture",
+) -> str:
+    """Build a JSON string that the LLM would return."""
+    if fields is None:
+        fields = {}
+    return json.dumps({
+        "reply": reply,
+        "fields": fields,
+        "intention": intention,
+    })
 
 
 def _build_command_handler(
@@ -156,42 +172,90 @@ class TestFlowMarker:
         assert ctx is not None
         assert ctx.flow == "enrich"
 
+    @pytest.mark.anyio
+    async def test_start_create_flow_sets_awaiting_input_step(self) -> None:
+        """start_create_flow() sets step=AWAITING_INPUT on the pending context."""
+        agent = _make_agent_with_mock_service()
+        await agent.start_create_flow(1, None)
+
+        ctx = agent.get_pending_context(1)
+        assert ctx is not None
+        assert ctx.step == SourceCreateStep.AWAITING_INPUT
+
+    @pytest.mark.anyio
+    async def test_start_enrich_flow_sets_awaiting_input_step(self) -> None:
+        """start_enrich_flow() sets step=AWAITING_INPUT on the pending context."""
+        agent = _make_agent_with_mock_service()
+        source = {
+            "id": "src-1",
+            "source_name": "yt-test-video",
+            "type": "youtube",
+            "url": "https://youtube.com/watch?v=abc",
+        }
+        await agent.start_enrich_flow(1, source)
+
+        ctx = agent.get_pending_context(1)
+        assert ctx is not None
+        assert ctx.step == SourceCreateStep.AWAITING_INPUT
+
 
 # ── TestGuidedCreateFlowCreatesSource ─────────────────────────────────────────
 
 
 class TestGuidedCreateFlowCreatesSource:
-    """Guided /create flow creates source only after confirmation."""
+    """Guided /create flow creates source only after LLM-driven confirmation."""
 
     @pytest.mark.anyio
-    async def test_guided_create_no_args_creates_source(self) -> None:
-        """Full guided /create flow: type → name (with prefix) → author → comment → confirm."""
+    async def test_guided_create_no_args_starts_open_ended(self) -> None:
+        """Full guided /create flow: open-ended prompt, not one-by-one."""
         agent = _make_agent_with_mock_service()
 
-        # Start guided /create (no args)
         reply = await agent.start_create_flow(1, None)
-        assert "What type of source" in reply
+        # Should be open-ended, not asking for type first
+        assert "create" in reply.lower()
 
-        # Provide type → prompts for name
-        reply = await agent.handle_response("book", 1)
-        assert "suggested name" in reply.lower()
+    @pytest.mark.anyio
+    async def test_guided_create_first_message_captures_all(self) -> None:
+        """First message captures all fields via LLM."""
+        agent = _make_agent_with_mock_service()
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Here is what I captured: bk-test-book by John Doe",
+            fields={"source_name": "bk-test-book", "type": "book", "author": "John Doe", "comment": "A great book"},
+            intention="capture",
+        ))
 
-        # Provide name with valid prefix → prompts for author
-        reply = await agent.handle_response("bk-test-book", 1)
-        assert "author" in reply.lower()
+        await agent.start_create_flow(1, None)
+        reply = await agent.handle_response(
+            "I want a book called bk-test-book by John Doe, it is a great book", 1
+        )
 
-        # Provide author → prompts for comment
-        reply = await agent.handle_response("John Doe", 1)
-        assert "comment" in reply.lower() or "anything else" in reply.lower()
+        # Should show summary, not create yet
+        assert "bk-test-book" in reply
+        agent._source_service.create_source_and_optionally_activate.assert_not_awaited()
 
-        # Provide comment → reaches confirmation
-        reply = await agent.handle_response("A great book", 1)
-        assert "Here's what" in reply or "anything else" in reply.lower()
+    @pytest.mark.anyio
+    async def test_guided_create_apply_creates_source(self) -> None:
+        """After capture, apply intention creates the source."""
+        agent = _make_agent_with_mock_service()
 
-        # Confirm
-        reply = await agent.handle_response("confirm", 1)
+        await agent.start_create_flow(1, None)
 
-        # Should have called create_source_and_optionally_activate
+        # Capture
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Captured!",
+            fields={"source_name": "bk-test-book", "type": "book", "author": "John Doe", "comment": "A great book"},
+            intention="capture",
+        ))
+        await agent.handle_response("book bk-test-book by John", 1)
+
+        # Apply
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Source created! We are now in note mode.",
+            fields={"source_name": "bk-test-book", "type": "book", "author": "John Doe", "comment": "A great book"},
+            intention="apply",
+        ))
+        reply = await agent.handle_response("si", 1)
+
         agent._source_service.create_source_and_optionally_activate.assert_awaited_once()
         call_kwargs = agent._source_service.create_source_and_optionally_activate.call_args.kwargs
         assert call_kwargs["activate"] is True
@@ -220,31 +284,25 @@ class TestGuidedCreateFlowCreatesSource:
         assert agent.get_pending_context(1) is None
 
     @pytest.mark.anyio
-    async def test_guided_create_confirmation_says_created(self) -> None:
-        """After guided create confirmation, reply contains 'Source created'."""
-        agent = _make_agent_with_mock_service()
-
-        await agent.start_create_flow(1, None)
-        await agent.handle_response("book", 1)  # type
-        await agent.handle_response("bk-test-book", 1)  # name
-        await agent.handle_response("John", 1)  # author
-        await agent.handle_response("A comment", 1)  # comment
-        reply = await agent.handle_response("confirm", 1)
-
-        assert "Source created" in reply
-        assert "Source updated" not in reply
-
-    @pytest.mark.anyio
     async def test_guided_create_clears_pending_context(self) -> None:
-        """After guided create confirmation, pending context is cleared."""
+        """After guided create apply, pending context is cleared."""
         agent = _make_agent_with_mock_service()
 
         await agent.start_create_flow(1, None)
-        await agent.handle_response("book", 1)  # type
-        await agent.handle_response("bk-test-book", 1)  # name
-        await agent.handle_response("John", 1)  # author
-        await agent.handle_response("A comment", 1)  # comment
-        await agent.handle_response("confirm", 1)
+
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Captured!",
+            fields={"source_name": "bk-test-book", "type": "book"},
+            intention="capture",
+        ))
+        await agent.handle_response("book bk-test-book", 1)
+
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Created!",
+            fields={"source_name": "bk-test-book", "type": "book"},
+            intention="apply",
+        ))
+        await agent.handle_response("yes", 1)
 
         assert agent.get_pending_context(1) is None
 
@@ -254,11 +312,20 @@ class TestGuidedCreateFlowCreatesSource:
         agent = _make_agent_with_mock_service()
 
         await agent.start_create_flow(1, None)
-        await agent.handle_response("book", 1)  # type
-        await agent.handle_response("bk-test-book", 1)  # name
-        await agent.handle_response("John", 1)  # author
-        await agent.handle_response("A comment", 1)  # comment
-        await agent.handle_response("confirm", 1)
+
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Captured!",
+            fields={"source_name": "bk-test-book", "type": "book"},
+            intention="capture",
+        ))
+        await agent.handle_response("book bk-test-book", 1)
+
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Created!",
+            fields={"source_name": "bk-test-book", "type": "book"},
+            intention="apply",
+        ))
+        await agent.handle_response("yes", 1)
 
         agent._source_service.create_source_and_optionally_activate.assert_awaited_once()
         call_kwargs = agent._source_service.create_source_and_optionally_activate.call_args.kwargs
@@ -282,37 +349,20 @@ class TestEnrichmentStillUpdateOnly:
             "url": "https://youtube.com/watch?v=abc",
         }
         await agent.start_enrich_flow(1, source)
-        await agent.handle_response("yes", 1)  # accept name
-        await agent.handle_response("John", 1)  # author
-        await agent.handle_response("Great tutorial", 1)  # comment
 
-        reply = await agent.handle_response("confirm", 1)
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Saved!",
+            fields={"author": "John", "comment": "Great tutorial"},
+            intention="apply",
+        ))
+        reply = await agent.handle_response("author John, comment Great tutorial", 1)
 
         agent._source_service.update_source.assert_awaited_once()
         agent._source_service.create_source_and_optionally_activate.assert_not_awaited()
 
     @pytest.mark.anyio
-    async def test_enrichment_confirmation_says_updated(self) -> None:
-        """After enrichment confirmation, reply contains 'Source updated'."""
-        agent = _make_agent_with_mock_service()
-        source = {
-            "id": "src-1",
-            "source_name": "yt-test-video",
-            "type": "youtube",
-            "url": "https://youtube.com/watch?v=abc",
-        }
-        await agent.start_enrich_flow(1, source)
-        await agent.handle_response("yes", 1)
-        await agent.handle_response("John", 1)
-        await agent.handle_response("A comment", 1)
-        reply = await agent.handle_response("confirm", 1)
-
-        assert "Source updated" in reply
-        assert "Source created" not in reply
-
-    @pytest.mark.anyio
     async def test_enrichment_does_not_create_source(self) -> None:
-        """After enrichment confirmation, create_source_and_optionally_activate is NOT called."""
+        """After enrichment apply, create_source_and_optionally_activate is NOT called."""
         agent = _make_agent_with_mock_service()
         source = {
             "id": "src-1",
@@ -321,10 +371,13 @@ class TestEnrichmentStillUpdateOnly:
             "url": "https://youtube.com/watch?v=abc",
         }
         await agent.start_enrich_flow(1, source)
+
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Saved!",
+            fields={},
+            intention="apply",
+        ))
         await agent.handle_response("yes", 1)
-        await agent.handle_response("skip", 1)
-        await agent.handle_response("skip", 1)
-        await agent.handle_response("confirm", 1)
 
         agent._source_service.create_source_and_optionally_activate.assert_not_awaited()
 
@@ -389,7 +442,6 @@ class TestNoSourceUpdateBehavior:
 
         # Should not contain prompts for more information
         assert "What type" not in reply
-        assert "author" not in reply.lower()
 
 
 # ── TestScreenshotScenario ────────────────────────────────────────────────────
@@ -407,7 +459,7 @@ class TestScreenshotScenario:
         # Start a guided create flow (pending context exists)
         ctx = SourceCreateContext(
             source_type="book",
-            step=SourceCreateStep.AWAITING_AUTHOR,
+            step=SourceCreateStep.AWAITING_INPUT,
             flow="create",
         )
         source_create_agent._pending[123] = ctx
@@ -442,22 +494,6 @@ class TestScreenshotScenario:
 
         assert result.outcome == "source_create_reply"
         chat_agent.get_response.assert_not_awaited()
-
-    @pytest.mark.anyio
-    async def test_transcribed_comment_applied_to_source(self) -> None:
-        """Transcribed voice comment becomes the comment field in confirmation."""
-        agent = _make_agent_with_mock_service()
-
-        await agent.start_create_flow(1, None)
-        await agent.handle_response("book", 1)  # type → prompts for name
-        await agent.handle_response("bk-test-book", 1)  # name → prompts for author
-        await agent.handle_response("John", 1)  # author → prompts for comment
-
-        # Simulate transcribed voice note providing the comment
-        reply = await agent.handle_response("This is my voice comment about the book", 1)
-
-        # Should reach confirmation with the transcribed comment
-        assert "This is my voice comment" in reply or "Here's what" in reply
 
 
 # ── TestURLCreationUnchanged ───────────────────────────────────────────────────
@@ -626,7 +662,6 @@ class TestImmediateNamedCreation:
 
         assert "Source created" in reply
         assert "my-source" in reply
-        assert "prefix" not in reply.lower() or "already exists" in reply.lower()
 
     @pytest.mark.anyio
     async def test_create_name_duplicate_returns_error(self) -> None:

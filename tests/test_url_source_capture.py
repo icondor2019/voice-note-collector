@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -15,6 +16,21 @@ from backend.services.source_create_agent import (
 )
 from backend.services.source_type_resolver import SourceTypeResolver
 from backend.services.url_detector_service import UrlDetectorService
+
+
+def _make_llm_response(
+    reply: str = "",
+    fields: dict | None = None,
+    intention: str = "capture",
+) -> str:
+    """Build a JSON string that the LLM would return."""
+    if fields is None:
+        fields = {}
+    return json.dumps({
+        "reply": reply,
+        "fields": fields,
+        "intention": intention,
+    })
 
 
 # ── UrlDetectorService ────────────────────────────────────────────────────────
@@ -228,7 +244,7 @@ class TestSourceCreateAgent:
     async def test_start_create_flow_no_args(self) -> None:
         agent = self._make_agent()
         reply = await agent.start_create_flow(user_id=1)
-        assert "type" in reply.lower() or "What type" in reply
+        assert "create" in reply.lower()
         assert agent.get_pending_context(1) is not None
 
     @pytest.mark.anyio
@@ -264,7 +280,7 @@ class TestSourceCreateAgent:
 
     @pytest.mark.anyio
     async def test_full_flow_url_create_then_enrich(self) -> None:
-        """Test the decoupled flow: URL create → /update → name → author → comment → confirm → update."""
+        """Test the decoupled flow: URL create -> /update -> LLM capture -> LLM apply -> update."""
         agent = self._make_agent()
 
         # Step 1: Deterministic URL creation — no pending context
@@ -287,31 +303,27 @@ class TestSourceCreateAgent:
         assert ctx is not None
         assert ctx.source_id == "1"
 
-        # Step 3: Accept suggested name
-        reply = await agent.handle_response("yes", user_id=1)
-        assert "author" in reply.lower()
-
-        # Step 4: Provide author
-        reply = await agent.handle_response("John Doe", user_id=1)
-        assert "comment" in reply.lower()
-
-        # Step 5: Provide comment — shows confirmation summary (no auto-apply)
-        reply = await agent.handle_response("Great tutorial", user_id=1)
-        assert "Here's what I'll update" in reply
-        assert "yt-test-video" in reply
+        # Step 3: LLM-driven capture
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Captured: John Doe, Great tutorial",
+            fields={"author": "John Doe", "comment": "Great tutorial"},
+            intention="capture",
+        ))
+        reply = await agent.handle_response("author John Doe, comment Great tutorial", user_id=1)
         assert "John Doe" in reply
         assert "Great tutorial" in reply
-        assert "Anything else to add" in reply
 
-        # Context should still be pending (awaiting confirmation)
+        # Context should still be pending
         assert agent.get_pending_context(1) is not None
-
-        # update_source should NOT have been called yet
         agent._source_service.update_source.assert_not_awaited()
 
-        # Step 6: Confirm — applies changes
-        reply = await agent.handle_response("confirm", user_id=1)
-        assert "✅ Source updated" in reply
+        # Step 4: LLM-driven apply
+        agent._call_llm = Mock(return_value=_make_llm_response(
+            reply="Saved! We are now in note mode.",
+            fields={"author": "John Doe", "comment": "Great tutorial"},
+            intention="apply",
+        ))
+        reply = await agent.handle_response("yes", user_id=1)
         assert "We are now in note mode" in reply
 
         # Context should be cleared
@@ -319,58 +331,6 @@ class TestSourceCreateAgent:
 
         # Verify update_source was called
         agent._source_service.update_source.assert_awaited_once()
-
-    @pytest.mark.anyio
-    async def test_always_ask_rule_author(self) -> None:
-        """Verify the agent asks for author even though it's optional."""
-        agent = self._make_agent()
-        active_source = {
-            "id": "1",
-            "source_name": "yt-test-video",
-            "type": "youtube",
-            "url": "https://youtube.com/watch?v=abc",
-        }
-        await agent.start_enrich_flow(1, active_source)
-        # Accept name → should ask for author
-        reply = await agent.handle_response("yes", user_id=1)
-        # After name step, agent MUST ask for author
-        assert "author" in reply.lower()
-
-    @pytest.mark.anyio
-    async def test_always_ask_rule_comment(self) -> None:
-        """Verify the agent asks for comment even though it's optional."""
-        agent = self._make_agent()
-        active_source = {
-            "id": "1",
-            "source_name": "yt-test-video",
-            "type": "youtube",
-            "url": "https://youtube.com/watch?v=abc",
-        }
-        await agent.start_enrich_flow(1, active_source)
-        await agent.handle_response("yes", user_id=1)  # accept name → asks author
-        reply = await agent.handle_response("skip", user_id=1)  # skip author → asks comment
-        # After author step, agent MUST ask for comment
-        assert "comment" in reply.lower()
-
-    @pytest.mark.anyio
-    async def test_skip_author_and_comment(self) -> None:
-        """User can skip optional fields."""
-        agent = self._make_agent()
-        active_source = {
-            "id": "1",
-            "source_name": "yt-test-video",
-            "type": "youtube",
-            "url": "https://youtube.com/watch?v=abc",
-        }
-        await agent.start_enrich_flow(1, active_source)
-        await agent.handle_response("yes", user_id=1)  # accept name
-        await agent.handle_response("skip", user_id=1)  # skip author
-        reply = await agent.handle_response("skip", user_id=1)  # skip comment → confirmation
-        assert "Here's what I'll update" in reply
-        assert "(empty)" in reply  # empty fields shown
-        # Confirm to apply
-        reply = await agent.handle_response("apply", user_id=1)
-        assert "✅ Source updated" in reply
 
     @pytest.mark.anyio
     async def test_clear_pending(self) -> None:
@@ -397,11 +357,29 @@ class TestSourceCreateContext:
             url="https://youtube.com/watch?v=abc",
             suggested_name="yt-cool-video",
             source_id="abc-123",
-            step=SourceCreateStep.AWAITING_AUTHOR,
+            step=SourceCreateStep.AWAITING_INPUT,
         )
         d = ctx.to_dict()
         restored = SourceCreateContext.from_dict(d)
         assert restored.source_type == "youtube"
         assert restored.url == "https://youtube.com/watch?v=abc"
         assert restored.source_id == "abc-123"
-        assert restored.step == SourceCreateStep.AWAITING_AUTHOR
+        assert restored.step == SourceCreateStep.AWAITING_INPUT
+
+    def test_from_dict_handles_old_step_values(self) -> None:
+        """from_dict() gracefully handles old step values by falling back to AWAITING_INPUT."""
+        data = {
+            "source_type": "youtube",
+            "step": "awaiting_name_confirm",  # old step value
+        }
+        ctx = SourceCreateContext.from_dict(data)
+        assert ctx.step == SourceCreateStep.AWAITING_INPUT
+
+    def test_from_dict_handles_unknown_step(self) -> None:
+        """from_dict() gracefully handles completely unknown step values."""
+        data = {
+            "source_type": "youtube",
+            "step": "some_future_step",
+        }
+        ctx = SourceCreateContext.from_dict(data)
+        assert ctx.step == SourceCreateStep.AWAITING_INPUT
