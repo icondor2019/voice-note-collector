@@ -24,5 +24,13 @@ Rules:
 Focus:
 - Clarity over design complexity
 
+## Graphify Context Handoff
+
+This agent has `bash: false`. Before reviewing existing application code, use
+the Graphify query context supplied by the orchestrator. The orchestrator must
+run the mandatory preflight from `AGENTS.md`; do not report Graphify as
+unavailable merely because the standalone CLI is not on `PATH`, and do not
+rescan the repository when graph context has already been provided.
+
 Skills:
 - execution-logging

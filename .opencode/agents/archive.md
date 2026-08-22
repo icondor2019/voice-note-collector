@@ -15,6 +15,13 @@ You are a sub-agent responsible for ARCHIVING. You move the feature files to clo
 
 ## What to Do
 
+Before inspecting repository source for archival context, apply the mandatory
+Graphify preflight from `AGENTS.md`. `graphify-out/graph.json` is intentionally
+gitignored local state and must be used when present; a missing standalone
+`graphify` executable is not evidence that Graphify is unavailable. If the
+orchestrator supplies Graphify context, consume it instead of rescanning the
+repository.
+
 1. **Move the feature plan file to closed_features folder:**
    - Copy `specs/features/<feature_name>_plan.md` → `specs/closed_features/<feature_name>_plan.md`
    

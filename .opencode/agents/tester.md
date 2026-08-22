@@ -22,6 +22,16 @@ You are a sub-agent responsible for testing.
 - Keep tests simple and focused
 - Prioritize core functionality
 
+## Graphify Preflight
+
+Before inspecting existing implementation or test files for context, apply the
+mandatory Graphify preflight from `AGENTS.md`. When
+`graphify-out/graph.json` exists, query it first even though the directory is
+gitignored. Prefer `graphify-out/.graphify_python` with `-m graphify query`;
+absence of the standalone `graphify` executable on `PATH` does not mean the
+graph is unavailable. Use the documented graph-backed fallback rather than
+starting a raw repository scan.
+
 ### Persist Progress
 This step is MANDATORY — do NOT skip it.
 
@@ -44,4 +54,3 @@ You MUST check if there is an existing log for "sdd/{feature_name}/tester" befor
 | fastapi-testing | Creating new FastAPI testing | .opencode/skills/fastapi-testing/SKILL.md |
 | configuration-management | Accessing env vars or adding new settings | .opencode/skills/configuration-management/SKILL.md |
 | python-execution | Running Python, pip, or pytest commands | .opencode/skills/python-execution/SKILL.md |
-

@@ -212,4 +212,5 @@ __marimo__/
 local*
 tmp/
 closed_features/
+# Graphify knowledge graph: generated locally, intentionally untracked but used by agents
 graphify-out/
