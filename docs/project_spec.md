@@ -62,7 +62,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 Table schemas are defined in backend/repositories/schema_queries.py
 Main tables:
 - voice_notes
-- sources (includes `url` nullable text and `type` nullable text with CHECK constraint: youtube|instagram|facebook|linkedin|web|book|course|thought|test|other)
+- sources (includes `url` nullable text, `type` nullable text with CHECK constraint: youtube|instagram|facebook|linkedin|web|book|course|thought|test|other, and `usage_status` text NOT NULL default 'active' CHECK: active|archive — controls visibility in /sources list, completely separate from the `status` column)
 - labels
 - voice_note_details (includes document_uuid FK to session_documents)
 - voice_note_labels (join table between voice notes and labels; soft-deleted via deleted_at, and records whether the label was applied by the LLM or the user)
@@ -143,11 +143,13 @@ Main tables:
 | `/agent` | Switch to agent mode (LLM-powered chat) |
 | `/reflect` | Enter reflect mode and start a reflection on a non-internalized note from the active source. Posts the first question. |
 | `/reflect stats` | Show internalization progress for the active source |
-| `/build_doc` | Synthesize pending notes from the active source into a session document. Enriches un-enriched notes first, then synthesizes via LLM. |
-| `/build_doc stats` | Preview pending notes for a session document without synthesizing (no DB writes). |
-| `/current` | Show the current mode and pending state |
+| `/build` | Synthesize pending notes from the active source into a session document. Enriches un-enriched notes first, then synthesizes via LLM. |
+| `/build st` | Preview pending notes for a session document without synthesizing (no DB writes). |
+| `/current` | Show the current active source with full metadata (type, author, comment, URL) and mode |
 | `/help` | List all available commands |
-| `/sources` | **Displays an interactive inline keyboard** (one button per source, ✅ marks the active source, pagination at 6 per page with ◀️/▶️ navigation). Tapping a source activates it and edits the message in place. `/switch <name>` is unchanged. |
+| `/sources` | **Displays an interactive inline keyboard** (one button per source, ✅ marks the active source, pagination at 6 per page with ◀️/▶️ navigation). Tapping a source activates it and edits the message in place. Accepts an optional type prefix argument to filter by type (e.g. `/sources yt` shows only YouTube sources). `/sources archive` shows only archived sources. Archived sources are excluded from the default and type-filtered views. `/switch <name>` is unchanged. |
+| `/archive` | Archive the currently active source (hide it from `/sources` list). The source remains the active chat source. |
+| `/archive back` | Restore the currently active source from archive (make it visible in `/sources` again). Idempotent. |
 | `/create` | Start guided source creation flow (agent asks for type, name, author, comment) |
 | `/create <name>` | Create a source with a given name (must have type prefix, e.g. `yt-my-video`) |
 | `/create <url>` | Create a source from a URL (deterministic: auto-detects type, generates default name, no LLM) |

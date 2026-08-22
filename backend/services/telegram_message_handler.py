@@ -10,11 +10,13 @@ from backend.services.source_create_agent import SourceCreateAgent
 from backend.services.source_service import SourceService
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.telegram_command_handler import (
+    SOURCES_ARCHIVE_HEADER,
     SOURCES_HEADER,
     SOURCES_PAGE_SIZE,
     SWITCH_SUCCESS,
     TelegramCommandHandler,
 )
+from backend.constants.sources_constants import ARCHIVE_KEYWORD
 from backend.services.telegram_ingestion_service import TelegramIngestionService
 from backend.services.transcription_service import TranscriptionService
 from backend.services.url_detector_service import UrlDetectorService
@@ -225,14 +227,15 @@ class TelegramMessageHandler:
                 callback_query_id, source_id, chat_id, message_id
             )
         elif callback_data.startswith("src_page:"):
-            page_str = callback_data[9:]
+            parts = callback_data[9:].split(":")
             try:
-                page = int(page_str)
-            except ValueError:
+                page = int(parts[0])
+            except (ValueError, IndexError):
                 await self._bot_client.answer_callback_query(callback_query_id)
                 return {"outcome": "error", "reason": "invalid_page"}
+            filter_prefix = parts[1] if len(parts) > 1 else ""
             return await self._handle_source_page_callback(
-                callback_query_id, page, chat_id, message_id
+                callback_query_id, page, chat_id, message_id, filter_prefix
             )
         else:
             await self._bot_client.answer_callback_query(callback_query_id)
@@ -262,7 +265,7 @@ class TelegramMessageHandler:
         if from_user_id is not None and self._source_create_agent:
             self._source_create_agent.clear_pending(from_user_id)
 
-        sources = await self._source_service.list_sources()
+        sources = await self._source_service.list_sources(usage_status="active")
         target_page = 0
         for i, s in enumerate(sources):
             if s["id"] == source_id:
@@ -278,6 +281,9 @@ class TelegramMessageHandler:
             )
         source_name = activated.get("source_name", "")
         confirmation_text = SWITCH_SUCCESS.format(slug=source_name)
+        details = self._command_handler.format_source_details(activated)
+        if details:
+            confirmation_text = f"{confirmation_text}\n{details}"
         if chat_id is not None:
             await self._bot_client.send_message(chat_id, confirmation_text)
         await self._bot_client.answer_callback_query(callback_query_id)
@@ -289,12 +295,37 @@ class TelegramMessageHandler:
         page: int,
         chat_id: int | str | None,
         message_id: int | None,
+        filter_prefix: str = "",
     ) -> dict:
-        sources = await self._source_service.list_sources()
-        keyboard = self._command_handler.build_sources_keyboard(sources, page=page)
+        # Check for archive keyword FIRST
+        if filter_prefix == ARCHIVE_KEYWORD:
+            sources = await self._source_service.list_sources(usage_status="archive")
+            header = SOURCES_ARCHIVE_HEADER
+        else:
+            sources = await self._source_service.list_sources(usage_status="active")
+            header = SOURCES_HEADER
+
+            # Re-apply the type filter if present
+            if filter_prefix:
+                from backend.constants.sources_constants import resolve_prefix_to_type
+                resolved_type = resolve_prefix_to_type(filter_prefix)
+                if resolved_type is not None:
+                    if resolved_type == "other":
+                        sources = [
+                            s for s in sources
+                            if s.get("type") == "other" or not s.get("type")
+                        ]
+                    else:
+                        sources = [
+                            s for s in sources if s.get("type") == resolved_type
+                        ]
+
+        keyboard = self._command_handler.build_sources_keyboard(
+            sources, page=page, filter_prefix=filter_prefix
+        )
         if chat_id is not None and message_id is not None:
             await self._bot_client.edit_message_text(
-                chat_id, message_id, SOURCES_HEADER, keyboard
+                chat_id, message_id, header, keyboard
             )
         await self._bot_client.answer_callback_query(callback_query_id)
         return {"outcome": "page_changed", "page": page}

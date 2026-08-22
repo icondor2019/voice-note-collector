@@ -573,14 +573,14 @@ async def test_help_message_includes_reflect_stats() -> None:
 
 @pytest.mark.anyio
 async def test_help_message_includes_build_doc() -> None:
-    """Assert HELP_MESSAGE includes /build_doc entry."""
-    assert "/build_doc" in HELP_MESSAGE
+    """Assert HELP_MESSAGE includes /build entry."""
+    assert "/build" in HELP_MESSAGE
     assert "synthesize" in HELP_MESSAGE.lower() or "session document" in HELP_MESSAGE.lower()
 
 
 @pytest.mark.anyio
 async def test_build_doc_creates_document() -> None:
-    """Send /build_doc; assert build called, reply contains title + content preview."""
+    """Send /build; assert build called, reply contains title + content preview."""
     from backend.services.session_builder_service import SessionBuilderService
 
     source_service = AsyncMock()
@@ -611,7 +611,7 @@ async def test_build_doc_creates_document() -> None:
         session_builder_service=session_builder,
     )
 
-    reply = await handler.handle_text("/build_doc", chat_id=123)
+    reply = await handler.handle_text("/build", chat_id=123)
 
     session_builder.build.assert_awaited_once_with("source-1", ["note-1", "note-2"])
     assert "Test Document" in reply
@@ -620,7 +620,7 @@ async def test_build_doc_creates_document() -> None:
 
 @pytest.mark.anyio
 async def test_build_doc_stats_returns_preview() -> None:
-    """Send /build_doc stats; assert preview returned, no build call."""
+    """Send /build st; assert preview returned, no build call."""
     from backend.services.session_builder_service import SessionBuilderService
 
     source_service = AsyncMock()
@@ -659,7 +659,7 @@ async def test_build_doc_stats_returns_preview() -> None:
         session_builder_service=session_builder,
     )
 
-    reply = await handler.handle_text("/build_doc stats", chat_id=123)
+    reply = await handler.handle_text("/build st", chat_id=123)
 
     session_builder.preview.assert_awaited_once()
     session_builder.build.assert_not_awaited()
@@ -691,7 +691,7 @@ async def test_build_doc_no_pending_notes() -> None:
         session_builder_service=session_builder,
     )
 
-    reply = await handler.handle_text("/build_doc", chat_id=123)
+    reply = await handler.handle_text("/build", chat_id=123)
 
     assert "⚠️" in reply
     assert "No pending notes" in reply
@@ -718,7 +718,7 @@ async def test_build_doc_no_active_source() -> None:
         session_builder_service=session_builder,
     )
 
-    reply = await handler.handle_text("/build_doc", chat_id=123)
+    reply = await handler.handle_text("/build", chat_id=123)
 
     assert "⚠️" in reply
     assert "No active source" in reply

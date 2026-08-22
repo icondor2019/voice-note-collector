@@ -6,20 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-VALID_SOURCE_TYPES = {
-    "youtube",
-    "instagram",
-    "facebook",
-    "linkedin",
-    "web",
-    "book",
-    "course",
-    "thought",
-    "test",
-    "other",
-}
-
-VALID_PREFIXES = ("yt-", "ig-", "fb-", "lkn-", "wb-", "bk-", "cr-", "th-", "ts-", "ot-")
+from backend.constants.sources_constants import VALID_PREFIXES, VALID_SOURCE_TYPES
 
 
 class SourceCreateByAgentRequest(BaseModel):

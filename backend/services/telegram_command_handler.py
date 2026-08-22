@@ -29,6 +29,11 @@ from backend.services.source_service import SourceService
 from backend.services.source_create_agent import SourceCreateAgent
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.url_detector_service import UrlDetectorService
+from backend.constants.sources_constants import (
+    ARCHIVE_KEYWORD,
+    SOURCE_PREFIX_TO_TYPE,
+    resolve_prefix_to_type,
+)
 from backend.utils.slug import slugify, validate_slug_input
 
 CREATE_SUCCESS = '✅ Source "{slug}" created and activated.'
@@ -41,6 +46,15 @@ CURRENT_NONE = '⚠️ No active source. Use /default to reset.\n🤖 Mode: {mod
 SOURCES_HEADER = "📂 Your sources:\n"
 SOURCES_EMPTY = "📂 No sources found. Use /create <name> to get started."
 SOURCES_PAGE_SIZE = 6
+SOURCES_FILTER_INVALID = (
+    "❌ Unknown type prefix \"{prefix}\". "
+    "Valid prefixes: {valid}"
+)
+SOURCES_FILTER_EMPTY = "📂 No sources found for type \"{type_name}\"."
+SOURCES_ARCHIVE_HEADER = "📦 Archived sources:\n"
+SOURCES_ARCHIVE_EMPTY = "📦 No archived sources."
+ARCHIVE_SUCCESS = '📦 Source "{slug}" archived.'
+ARCHIVE_BACK_SUCCESS = '✅ Source "{slug}" restored to active.'
 INVALID_NAME = "❌ Source name must be 2–4 words, no special characters."
 UNKNOWN_TEXT = "🤖 Send voice notes to capture ideas. Use /sources to manage sources."
 LABEL_SUCCESS = '✅ Label "{name}" created.'
@@ -52,12 +66,15 @@ HELP_MESSAGE = (
     "🤖 /agent — activate agent mode\n"
     "📝 /note — activate note mode\n"
     "📂 /sources — list your sources\n"
+    "📂 /sources archive — list archived sources\n"
+    "📦 /archive — archive the active source (hide from /sources)\n"
+    "📦 /archive back — restore the active source from archive\n"
     "✅ /current — show active source and mode\n"
     "⚙️ /default — set default source\n"
     "🧠 /reflect — start a reflection question\n"
     "🔢 /reflect stats — show internalization progress\n"
-    "📚 /build_doc — synthesize pending notes into a session document\n"
-    "📊 /build_doc stats — preview pending notes without synthesizing\n"
+    "📚 /build — synthesize pending notes into a session document\n"
+    "📊 /build st — preview pending notes without synthesizing\n"
     "🔄 /update — enrich active source metadata (name, author, comment)\n"
     "❓ /help — show this message\n\n"
     "⚙️ Commands that require arguments:\n\n"
@@ -120,13 +137,13 @@ class TelegramCommandHandler:
         elif command == "/current":
             reply = await self._handle_current()
         elif command == "/sources":
-            return await self._handle_sources(chat_id)
+            return await self._handle_sources(chat_id, argument)
         elif command == "/label":
             reply = await self._handle_label(argument)
         elif command == "/reflect":
             reply = await self._handle_reflect(from_user_id, argument)
-        elif command == "/build_doc":
-            if argument == "stats":
+        elif command == "/build":
+            if argument == "st":
                 reply = await self._handle_build_doc_stats(from_user_id)
             else:
                 reply = await self._handle_build_doc(from_user_id, chat_id)
@@ -136,6 +153,8 @@ class TelegramCommandHandler:
             reply = self._handle_note_mode()
         elif command == "/update":
             reply = await self._handle_enrich(from_user_id or 0)
+        elif command == "/archive":
+            reply = await self._handle_archive(argument)
         elif command == "/help":
             reply = self._handle_help()
         else:
@@ -185,6 +204,22 @@ class TelegramCommandHandler:
 
         return await self._source_create_agent.start_enrich_flow(user_id, active_source)
 
+    async def _handle_archive(self, argument: str) -> str:
+        """Handle /archive command — archive or restore the active source."""
+        active_source = await self._source_service.get_active_source()
+        if not active_source:
+            return "⚠️ No active source. Use /switch or /default to set one."
+
+        source_id = active_source["id"]
+        source_name = active_source.get("source_name", "unknown")
+
+        if argument.strip().lower() == "back":
+            await self._source_service.set_usage_status(source_id, "active")
+            return ARCHIVE_BACK_SUCCESS.format(slug=source_name)
+
+        await self._source_service.set_usage_status(source_id, "archive")
+        return ARCHIVE_SUCCESS.format(slug=source_name)
+
     async def _handle_switch(self, argument: str) -> str:
         if not argument or not validate_slug_input(argument):
             return INVALID_NAME
@@ -200,7 +235,11 @@ class TelegramCommandHandler:
             user_id = getattr(self, "_current_user_id", 0)
             self._source_create_agent.clear_pending(user_id)
         logger.info("telegram.command.switch", extra={"slug": slug})
-        return SWITCH_SUCCESS.format(slug=slug)
+        confirmation = SWITCH_SUCCESS.format(slug=slug)
+        details = self.format_source_details(existing)
+        if details:
+            return f"{confirmation}\n{details}"
+        return confirmation
 
     async def _handle_default(self) -> str:
         default_source = await self._source_service._repository.get_source_by_name("default")
@@ -215,10 +254,35 @@ class TelegramCommandHandler:
             self._source_create_agent.clear_pending(user_id)
 
         logger.info("telegram.command.default")
+        details = self.format_source_details(default_source)
+        if details:
+            return f"{DEFAULT_SUCCESS}\n{details}"
         return DEFAULT_SUCCESS
 
     def _get_mode_display(self) -> str:
         return MODE_DISPLAY_NAMES.get(self._chat_mode_service.get_mode(), "note")
+
+    def format_source_details(self, source: dict) -> str:
+        """Return multi-line string with type/author/comment/URL, omitting empty fields.
+
+        Does NOT include the source name — that stays in the caller's header line.
+        """
+        lines: list[str] = []
+        source_type = source.get("type")
+        if source_type:
+            lines.append(f"📁 Type: {source_type}")
+        author = source.get("author")
+        if author:
+            lines.append(f"✍️ Author: {author}")
+        comment = source.get("comment")
+        if comment:
+            lines.append(f"💬 Comment: {comment}")
+        url = source.get("url")
+        if url:
+            lines.append(f"🔗 URL: {url}")
+        if source.get("usage_status") == "archive":
+            lines.append("📦 Archived")
+        return "\n".join(lines)
 
     async def _handle_current(self) -> str:
         active = await self._source_service.get_active_source()
@@ -226,21 +290,67 @@ class TelegramCommandHandler:
         if not active:
             return CURRENT_NONE.format(mode=mode)
 
-        return CURRENT_ACTIVE.format(name=active["source_name"], mode=mode)
+        details = self.format_source_details(active)
+        mode_line = f"🤖 Mode: {mode}"
+        if details:
+            return f'📍 Active source: "{active["source_name"]}"\n{details}\n{mode_line}'
+        return f'📍 Active source: "{active["source_name"]}"\n{mode_line}'
 
-    async def _handle_sources(self, chat_id: int | str) -> str:
-        sources = await self._source_service.list_sources()
+    async def _handle_sources(self, chat_id: int | str, filter_prefix: str = "") -> str:
+        # Check for archive keyword FIRST — before type prefix resolution
+        if filter_prefix.strip().lower() == ARCHIVE_KEYWORD:
+            sources = await self._source_service.list_sources(usage_status="archive")
+            if not sources:
+                await self._bot_client.send_message(chat_id, SOURCES_ARCHIVE_EMPTY)
+                return SOURCES_ARCHIVE_EMPTY
+            keyboard = self.build_sources_keyboard(
+                sources, page=0, filter_prefix=ARCHIVE_KEYWORD
+            )
+            await self._bot_client.send_message_with_inline_keyboard(
+                chat_id, SOURCES_ARCHIVE_HEADER, keyboard
+            )
+            return SOURCES_ARCHIVE_HEADER
+
+        sources = await self._source_service.list_sources(usage_status="active")
+
+        # Apply type prefix filter if provided
+        if filter_prefix:
+            resolved_type = resolve_prefix_to_type(filter_prefix)
+            if resolved_type is None:
+                valid = ", ".join(sorted(SOURCE_PREFIX_TO_TYPE.keys()))
+                reply = SOURCES_FILTER_INVALID.format(
+                    prefix=filter_prefix, valid=valid
+                )
+                await self._bot_client.send_message(chat_id, reply)
+                return reply
+            # Filter sources by type; for "other", also match empty/None type
+            if resolved_type == "other":
+                sources = [
+                    s for s in sources
+                    if s.get("type") == "other" or not s.get("type")
+                ]
+            else:
+                sources = [
+                    s for s in sources if s.get("type") == resolved_type
+                ]
+            if not sources:
+                reply = SOURCES_FILTER_EMPTY.format(type_name=resolved_type)
+                await self._bot_client.send_message(chat_id, reply)
+                return reply
+
         if not sources:
             await self._bot_client.send_message(chat_id, SOURCES_EMPTY)
             return SOURCES_EMPTY
 
-        keyboard = self.build_sources_keyboard(sources, page=0)
+        keyboard = self.build_sources_keyboard(sources, page=0, filter_prefix=filter_prefix)
         await self._bot_client.send_message_with_inline_keyboard(
             chat_id, SOURCES_HEADER, keyboard
         )
         return SOURCES_HEADER
 
-    def build_sources_keyboard(self, sources: list[dict], page: int = 0) -> dict:
+    def build_sources_keyboard(
+        self, sources: list[dict], page: int = 0, filter_prefix: str = ""
+    ) -> dict:
         total_pages = max(1, math.ceil(len(sources) / SOURCES_PAGE_SIZE))
         page = max(0, min(page, total_pages - 1))
         page_sources = sources[
@@ -259,10 +369,16 @@ class TelegramCommandHandler:
 
         if total_pages > 1:
             nav_row: list[dict] = []
+            if filter_prefix:
+                prev_cb = f"src_page:{page - 1}:{filter_prefix}"
+                next_cb = f"src_page:{page + 1}:{filter_prefix}"
+            else:
+                prev_cb = f"src_page:{page - 1}"
+                next_cb = f"src_page:{page + 1}"
             if page > 0:
-                nav_row.append({"text": "◀️", "callback_data": f"src_page:{page - 1}"})
+                nav_row.append({"text": "◀️", "callback_data": prev_cb})
             if page < total_pages - 1:
-                nav_row.append({"text": "▶️", "callback_data": f"src_page:{page + 1}"})
+                nav_row.append({"text": "▶️", "callback_data": next_cb})
             if nav_row:
                 buttons.append(nav_row)
 
