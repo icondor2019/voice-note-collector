@@ -32,6 +32,10 @@ VALID_PREFIXES: tuple[str, ...] = tuple(
 )
 
 
+# Special keyword for /sources archive — NOT a type prefix
+ARCHIVE_KEYWORD = "archive"
+
+
 def resolve_prefix_to_type(prefix_arg: str) -> Optional[str]:
     """Normalize a prefix argument and resolve it to a canonical type.
 

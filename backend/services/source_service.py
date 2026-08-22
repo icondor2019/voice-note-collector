@@ -10,6 +10,7 @@ class SourceService:
     def __init__(self, repository: Optional[SourcesRepository] = None) -> None:
         self._repository = repository or SourcesRepository()
         self._allowed_statuses = {"active", "deactivated"}
+        self._allowed_usage_statuses = {"active", "archive"}
 
     async def ensure_default_source(self) -> dict[str, Any]:
         sources = await self._repository.list_sources()
@@ -111,10 +112,26 @@ class SourceService:
         activated = await self._repository.activate_source(source["id"])
         return activated or source
 
-    async def list_sources(self, status: Optional[str] = None) -> list[dict[str, Any]]:
+    async def list_sources(
+        self,
+        status: Optional[str] = None,
+        usage_status: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
         if status and status not in self._allowed_statuses:
             raise ValueError("Invalid status. Use 'active' or 'deactivated'.")
-        return await self._repository.list_sources(status=status)
+        if usage_status and usage_status not in self._allowed_usage_statuses:
+            raise ValueError("Invalid usage_status. Use 'active' or 'archive'.")
+        return await self._repository.list_sources(
+            status=status, usage_status=usage_status
+        )
+
+    async def set_usage_status(
+        self, source_id: str, usage_status: str
+    ) -> Optional[dict[str, Any]]:
+        """Set the usage_status (active/archive) for a source. Delegates to repository."""
+        if usage_status not in self._allowed_usage_statuses:
+            raise ValueError("Invalid usage_status. Use 'active' or 'archive'.")
+        return await self._repository.set_usage_status(source_id, usage_status)
 
     async def get_active_source(self) -> Optional[dict[str, Any]]:
         return await self._repository.get_active_source()

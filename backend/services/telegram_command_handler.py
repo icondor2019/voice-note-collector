@@ -29,7 +29,11 @@ from backend.services.source_service import SourceService
 from backend.services.source_create_agent import SourceCreateAgent
 from backend.services.telegram_bot_client import TelegramBotClient
 from backend.services.url_detector_service import UrlDetectorService
-from backend.constants.sources_constants import SOURCE_PREFIX_TO_TYPE, resolve_prefix_to_type
+from backend.constants.sources_constants import (
+    ARCHIVE_KEYWORD,
+    SOURCE_PREFIX_TO_TYPE,
+    resolve_prefix_to_type,
+)
 from backend.utils.slug import slugify, validate_slug_input
 
 CREATE_SUCCESS = '✅ Source "{slug}" created and activated.'
@@ -47,6 +51,10 @@ SOURCES_FILTER_INVALID = (
     "Valid prefixes: {valid}"
 )
 SOURCES_FILTER_EMPTY = "📂 No sources found for type \"{type_name}\"."
+SOURCES_ARCHIVE_HEADER = "📦 Archived sources:\n"
+SOURCES_ARCHIVE_EMPTY = "📦 No archived sources."
+ARCHIVE_SUCCESS = '📦 Source "{slug}" archived.'
+ARCHIVE_BACK_SUCCESS = '✅ Source "{slug}" restored to active.'
 INVALID_NAME = "❌ Source name must be 2–4 words, no special characters."
 UNKNOWN_TEXT = "🤖 Send voice notes to capture ideas. Use /sources to manage sources."
 LABEL_SUCCESS = '✅ Label "{name}" created.'
@@ -58,6 +66,9 @@ HELP_MESSAGE = (
     "🤖 /agent — activate agent mode\n"
     "📝 /note — activate note mode\n"
     "📂 /sources — list your sources\n"
+    "📂 /sources archive — list archived sources\n"
+    "📦 /archive — archive the active source (hide from /sources)\n"
+    "📦 /archive back — restore the active source from archive\n"
     "✅ /current — show active source and mode\n"
     "⚙️ /default — set default source\n"
     "🧠 /reflect — start a reflection question\n"
@@ -142,6 +153,8 @@ class TelegramCommandHandler:
             reply = self._handle_note_mode()
         elif command == "/update":
             reply = await self._handle_enrich(from_user_id or 0)
+        elif command == "/archive":
+            reply = await self._handle_archive(argument)
         elif command == "/help":
             reply = self._handle_help()
         else:
@@ -190,6 +203,22 @@ class TelegramCommandHandler:
             return "⚠️ No active source. Use /switch or /default to set one."
 
         return await self._source_create_agent.start_enrich_flow(user_id, active_source)
+
+    async def _handle_archive(self, argument: str) -> str:
+        """Handle /archive command — archive or restore the active source."""
+        active_source = await self._source_service.get_active_source()
+        if not active_source:
+            return "⚠️ No active source. Use /switch or /default to set one."
+
+        source_id = active_source["id"]
+        source_name = active_source.get("source_name", "unknown")
+
+        if argument.strip().lower() == "back":
+            await self._source_service.set_usage_status(source_id, "active")
+            return ARCHIVE_BACK_SUCCESS.format(slug=source_name)
+
+        await self._source_service.set_usage_status(source_id, "archive")
+        return ARCHIVE_SUCCESS.format(slug=source_name)
 
     async def _handle_switch(self, argument: str) -> str:
         if not argument or not validate_slug_input(argument):
@@ -251,6 +280,8 @@ class TelegramCommandHandler:
         url = source.get("url")
         if url:
             lines.append(f"🔗 URL: {url}")
+        if source.get("usage_status") == "archive":
+            lines.append("📦 Archived")
         return "\n".join(lines)
 
     async def _handle_current(self) -> str:
@@ -266,7 +297,21 @@ class TelegramCommandHandler:
         return f'📍 Active source: "{active["source_name"]}"\n{mode_line}'
 
     async def _handle_sources(self, chat_id: int | str, filter_prefix: str = "") -> str:
-        sources = await self._source_service.list_sources()
+        # Check for archive keyword FIRST — before type prefix resolution
+        if filter_prefix.strip().lower() == ARCHIVE_KEYWORD:
+            sources = await self._source_service.list_sources(usage_status="archive")
+            if not sources:
+                await self._bot_client.send_message(chat_id, SOURCES_ARCHIVE_EMPTY)
+                return SOURCES_ARCHIVE_EMPTY
+            keyboard = self.build_sources_keyboard(
+                sources, page=0, filter_prefix=ARCHIVE_KEYWORD
+            )
+            await self._bot_client.send_message_with_inline_keyboard(
+                chat_id, SOURCES_ARCHIVE_HEADER, keyboard
+            )
+            return SOURCES_ARCHIVE_HEADER
+
+        sources = await self._source_service.list_sources(usage_status="active")
 
         # Apply type prefix filter if provided
         if filter_prefix:

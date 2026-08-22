@@ -73,13 +73,36 @@ class SourcesRepository:
         self._raise_on_error(response, allow_none_response=True)
         return self._single(response)
 
-    async def list_sources(self, status: Optional[str] = None) -> list[dict[str, Any]]:
+    async def list_sources(
+        self,
+        status: Optional[str] = None,
+        usage_status: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
         query = self._client.table(self._table).select("*")
         if status:
             query = query.eq("status", status)
+        if usage_status:
+            query = query.eq("usage_status", usage_status)
         response = await query.order("created_at", desc=True).execute()
         self._raise_on_error(response)
         return self._list(response)
+
+    async def set_usage_status(
+        self, source_id: str, usage_status: str
+    ) -> Optional[dict[str, Any]]:
+        """Set the usage_status (active/archive) for a source. Returns updated record."""
+        logger.info(
+            "sources.set_usage_status",
+            extra={"source_id": source_id, "usage_status": usage_status},
+        )
+        response = (
+            await self._client.table(self._table)
+            .update({"usage_status": usage_status})
+            .eq("id", source_id)
+            .execute()
+        )
+        self._raise_on_error(response, allow_none_response=True)
+        return self._single(response)
 
     async def deactivate_all_sources(self) -> int:
         response = (
