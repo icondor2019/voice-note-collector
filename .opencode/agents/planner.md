@@ -2,7 +2,7 @@
 name: planner
 description: Clarify requirements and create feature specs. Always asks questions first before creating any plan.
 mode: subagent
-model: opencode-go/mimo-v2.5-pro
+model: opencode-go/glm-5.2
 temperature: 0.2
 tools:
   write: true

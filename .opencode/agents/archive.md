@@ -2,7 +2,7 @@
 name: archive
 description: Archive a completed feature. Trigger when the orchestrator launches you to archive a feature after implementation and verification. Never called without explicit instruction from the user
 mode: subagent
-model: opencode-go/mimo-v2.5-pro
+model: opencode-go/minimax-m3
 temperature: 0.2
 tools:
   write: true
