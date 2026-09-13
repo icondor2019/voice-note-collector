@@ -32,7 +32,7 @@ The primary goal is to create a **personal knowledge capture system**, optimized
 * Multi-agent service: a single `MultiAgentService` with a supervisor and sub-graphs for chat and reflection. Reflect is a first-class mode with Socratic hints and auto-continuation.
 * Reflection Agent: `/reflect` slash command that starts a Socratic reflection loop on a non-internalized note from the active source, with `HintAgent` (bilingual Socratic hints), `ScorerAgent` (1-10 rating + structured feedback), and auto-continuation to the next note. Slash-cancels-reflect: any slash command in reflect mode cancels the pending reflection and exits to agent mode.
 * Reflection stats: `/reflect stats` subcommand showing internalization progress per active source
-* Read-only web library with dashboard statistics, filtered note exploration, and rendered session documents
+* Authenticated web library with dashboard statistics, filtered note exploration, rendered session documents, and selected-note document building
 * Supabase email/password web authentication restricted to one configured user
 
 ### Excluded (for now)
@@ -88,7 +88,8 @@ Main tables:
 ### Web library
 
 - FastAPI serves a responsive Jinja + HTMX interface from the same Railway service.
-- The web surface is read-only in v1 and keeps notes and synthesized documents as separate libraries.
+- The web surface keeps notes and synthesized documents as separate libraries and permits an authenticated user to build a session document from explicitly selected, eligible notes.
+- Web document building is restricted to notes from one source per build; notes already attached to a document remain visible but cannot be selected.
 - All templates and browser assets live under `frontend/`; no external CDN is used.
 - Web sessions use Supabase Auth and an allowlisted email. Existing API-key and Telegram security remain unchanged.
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -13,8 +13,11 @@ from backend.repositories.session_documents_repository import SessionDocumentsRe
 from backend.repositories.sources_repository import SourcesRepository
 from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
+from backend.controllers.session_documents_controller import get_session_builder_service
+from backend.models.session_document import SessionDocumentCreateRequest
 from backend.services.dashboard_service import DashboardService
 from backend.services.session_document_service import SessionDocumentService
+from backend.services.session_builder_service import EnrichmentIncompleteError, NoValidNotesError, SessionBuilderService
 from backend.services.source_service import SourceService
 from backend.services.voice_note_service import VoiceNoteService
 from backend.services.web_auth_service import WebAuthError, WebAuthService, WebSession
@@ -226,6 +229,30 @@ async def notes(
     }
     template = "notes/_cards.html" if request.headers.get("HX-Request") == "true" else "notes/index.html"
     return _template(request, template, context)
+
+
+@router.post("/notes/build", status_code=201)
+async def build_notes(
+    payload: SessionDocumentCreateRequest,
+    request: Request,
+    csrf_token: Optional[str] = Header(None, alias="X-CSRF-Token"),
+    session: WebSession = Depends(require_web_session),
+    service: SessionBuilderService = Depends(get_session_builder_service),
+) -> dict[str, str]:
+    """Build a session document from notes selected in the web library."""
+    validate_csrf(request, csrf_token)
+    try:
+        document = await service.build(
+            source_id=str(payload.source_id),
+            note_ids=[str(note_id) for note_id in payload.note_ids],
+        )
+    except NoValidNotesError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except EnrichmentIncompleteError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    document_id = str(document["id"])
+    return {"document_id": document_id, "redirect_url": f"/documents/{document_id}"}
 
 
 @router.get("/notes/{note_id}", response_class=HTMLResponse)

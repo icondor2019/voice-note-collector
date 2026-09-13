@@ -104,8 +104,8 @@ class Client:
 async def test_web_notes_use_enrichment_fallback_and_or_label_filter() -> None:
     client = Client({
         "voice_notes": [
-            {"id": "n1", "raw_text": "raw one", "clean_text": "clean one", "created_at": "2026-09-10", "sources": {"source_name": "Source"}, "voice_note_details": {"title": "Title", "status": "enriched"}, "voice_note_labels": [{"label_id": 1, "deleted_at": None}]},
-            {"id": "n2", "raw_text": "raw two", "clean_text": None, "created_at": "2026-09-09", "sources": {"source_name": "Source"}, "voice_note_details": {"title": None, "status": "created"}, "voice_note_labels": [{"label_id": 2, "deleted_at": None}]},
+            {"id": "n1", "raw_text": "raw one", "clean_text": "clean one", "created_at": "2026-09-10", "sources": {"id": "s1", "source_name": "Source"}, "voice_note_details": {"title": "Title", "status": "enriched", "document_uuid": None}, "voice_note_labels": [{"label_id": 1, "deleted_at": None}]},
+            {"id": "n2", "raw_text": "raw two", "clean_text": None, "created_at": "2026-09-09", "sources": {"id": "s1", "source_name": "Source"}, "voice_note_details": {"title": None, "status": "created", "document_uuid": "doc-1"}, "voice_note_labels": [{"label_id": 2, "deleted_at": None}]},
         ],
         "voice_note_labels": [
             {"voice_note_uuid": "n1", "labels": {"id": 1, "label": "architecture"}},
@@ -119,8 +119,31 @@ async def test_web_notes_use_enrichment_fallback_and_or_label_filter() -> None:
     assert [row["id"] for row in result] == ["n1"]
     assert result[0]["display_title"] == "Title"
     assert result[0]["preview"] == "clean one"
+    assert result[0]["build_eligible"] is True
+    assert result[0]["build_block_reason"] is None
     assert ("voice_notes", "in", ("voice_note_labels.label_id", [1, 99])) in client.calls
     assert ("voice_notes", "is", ("voice_note_labels.deleted_at", "null")) in client.calls
+
+
+@pytest.mark.anyio
+async def test_web_notes_mark_document_members_and_missing_details_unavailable() -> None:
+    client = Client({
+        "voice_notes": [
+            {"id": "available", "source_id": "s1", "sources": {"id": "s1", "source_name": "Source"}, "voice_note_details": {"status": "created", "document_uuid": None}},
+            {"id": "used", "source_id": "s1", "sources": {"id": "s1", "source_name": "Source"}, "voice_note_details": {"status": "enriched", "document_uuid": "doc-1"}},
+            {"id": "missing", "source_id": "s1", "sources": {"id": "s1", "source_name": "Source"}, "voice_note_details": None},
+        ],
+        "voice_note_labels": [],
+    })
+
+    result = await VoiceNotesRepository(client).list_web_notes()
+
+    by_id = {row["id"]: row for row in result}
+    assert by_id["available"]["build_eligible"] is True
+    assert by_id["used"]["build_eligible"] is False
+    assert by_id["used"]["build_block_reason"] == "in_document"
+    assert by_id["missing"]["build_eligible"] is False
+    assert by_id["missing"]["build_block_reason"] == "unavailable"
 
 
 @pytest.mark.anyio

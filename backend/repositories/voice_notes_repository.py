@@ -171,9 +171,9 @@ class VoiceNotesRepository:
     ) -> list[dict[str, Any]]:
         """Return the enriched projection used by the server-rendered note library."""
         details_relation = (
-            "voice_note_details!inner(title, status, created_at, updated_at)"
+            "voice_note_details!inner(title, status, created_at, updated_at, document_uuid)"
             if status
-            else "voice_note_details(title, status, created_at, updated_at)"
+            else "voice_note_details(title, status, created_at, updated_at, document_uuid)"
         )
         projection = [
             "*",
@@ -224,6 +224,11 @@ class VoiceNotesRepository:
             item["source"] = source
             item["display_title"] = details.get("title") or "Untitled note"
             item["preview"] = (row.get("clean_text") or row.get("raw_text") or "")[:280]
+            document_uuid = details.get("document_uuid") if isinstance(details, dict) else None
+            item["build_eligible"] = bool(details) and not document_uuid
+            item["build_block_reason"] = (
+                "in_document" if document_uuid else "unavailable" if not details else None
+            )
             items.append(item)
         return items
 
