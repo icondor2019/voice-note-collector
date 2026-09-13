@@ -1,0 +1,57 @@
+<form class="library-filters" method="get" action="{{ action }}" data-library-filters>
+  <div class="filter-fields">
+    <div>
+      <label for="source_id">Source</label>
+      <select id="source_id" name="source_id">
+        <option value="">All sources</option>
+        {% for source in sources %}
+        <option value="{{ source.id }}" {% if filters.source_id == source.id|string %}selected{% endif %}>{{ source.source_name }}{% if source.usage_status == 'archive' %} · archived{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="source_type">Source type</label>
+      <select id="source_type" name="source_type">
+        <option value="">All types</option>
+        {% for value in source_types %}<option value="{{ value }}" {% if filters.source_type == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="source_usage_status">Source usage</label>
+      <select id="source_usage_status" name="source_usage_status">
+        <option value="">Any usage status</option>
+        {% for value in source_usage_statuses %}<option value="{{ value }}" {% if filters.source_usage_status == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="status">{{ filters.status_label }}</label>
+      <select id="status" name="status">
+        <option value="">Any status</option>
+        {% for value in statuses %}<option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <fieldset class="label-filter">
+    <legend>Labels</legend>
+    <div class="label-options label-options-primary">
+      {% for label in labels[:10] %}
+      <label class="check-chip"><input type="checkbox" name="label_id" value="{{ label.id }}" {% if label.id in selected_labels %}checked{% endif %}><span>{{ label.label }}{% if label.count is defined %} · {{ '99+' if label.count > 99 else label.count }}{% endif %}</span></label>
+      {% endfor %}
+    </div>
+    {% if labels|length > 10 %}
+    {% set hidden_selected = labels[10:]|selectattr('id', 'in', selected_labels)|list|length > 0 %}
+    <div class="label-options label-options-more" id="more-labels-{{ active_page }}" data-more-labels-region hidden>
+      {% for label in labels[10:] %}
+      <label class="check-chip"><input type="checkbox" name="label_id" value="{{ label.id }}" {% if label.id in selected_labels %}checked{% endif %}><span>{{ label.label }}{% if label.count is defined %} · {{ '99+' if label.count > 99 else label.count }}{% endif %}</span></label>
+      {% endfor %}
+    </div>
+    <button class="more-labels-toggle" type="button" aria-expanded="false" aria-controls="more-labels-{{ active_page }}" data-more-labels-toggle data-has-hidden-selection="{{ 'true' if hidden_selected else 'false' }}">See more labels <span aria-hidden="true">↓</span></button>
+    {% endif %}
+  </fieldset>
+
+  <div class="filter-actions">
+    <button class="primary-button" type="submit">Apply filters</button>
+    <a class="clear-filters" href="{{ action }}" data-clear-filters>Clear</a>
+  </div>
+</form>

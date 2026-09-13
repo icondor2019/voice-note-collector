@@ -99,3 +99,29 @@ class VoiceNoteService:
             created_after=created_after,
             created_before=created_before,
         )
+
+    async def list_web_notes(
+        self,
+        *,
+        source_id: Optional[str] = None,
+        source_type: Optional[str] = None,
+        source_author: Optional[str] = None,
+        source_usage_status: Optional[str] = None,
+        status: Optional[str] = None,
+        label_ids: Optional[list[int]] = None,
+        offset: int = 0,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        return await self._repository.list_web_notes(
+            source_id=source_id,
+            source_type=source_type,
+            source_author=source_author,
+            source_usage_status=source_usage_status,
+            status=status,
+            label_ids=label_ids,
+            offset=offset,
+            limit=limit,
+        )
+
+    async def get_web_note(self, note_id: str) -> Optional[dict[str, Any]]:
+        return await self._repository.get_web_note(note_id)

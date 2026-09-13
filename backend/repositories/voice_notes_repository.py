@@ -94,6 +94,119 @@ class VoiceNotesRepository:
         self._raise_on_error(response)
         return self._list(response)
 
+    async def count_voice_notes(self) -> int:
+        response = await self._client.table(self._table).select("id", count="exact").execute()
+        self._raise_on_error(response)
+        count = getattr(response, "count", None)
+        return int(count) if count is not None else len(self._list(response))
+
+    async def get_latest_note_created_at(self) -> Optional[str]:
+        response = (
+            await self._client.table(self._table)
+            .select("created_at")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        self._raise_on_error(response)
+        rows = self._list(response)
+        return rows[0].get("created_at") if rows else None
+
+    async def list_web_notes(
+        self,
+        *,
+        source_id: Optional[str] = None,
+        source_type: Optional[str] = None,
+        source_author: Optional[str] = None,
+        source_usage_status: Optional[str] = None,
+        status: Optional[str] = None,
+        label_ids: Optional[list[int]] = None,
+        offset: int = 0,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        """Return the enriched projection used by the server-rendered note library."""
+        details_relation = (
+            "voice_note_details!inner(title, status, created_at, updated_at)"
+            if status
+            else "voice_note_details(title, status, created_at, updated_at)"
+        )
+        projection = [
+            "*",
+            "sources!inner(id, source_name, type, author, usage_status)",
+            details_relation,
+        ]
+        if label_ids:
+            projection.append("voice_note_labels!inner(label_id, deleted_at)")
+
+        query = self._client.table(self._table).select(", ".join(projection))
+        if source_id:
+            query = query.eq("source_id", source_id)
+        if source_type:
+            query = query.eq("sources.type", source_type)
+        if source_author:
+            query = query.eq("sources.author", source_author)
+        if source_usage_status:
+            query = query.eq("sources.usage_status", source_usage_status)
+        if status:
+            query = query.eq("voice_note_details.status", status)
+        if label_ids:
+            query = query.in_("voice_note_labels.label_id", label_ids)
+            query = query.is_("voice_note_labels.deleted_at", "null")
+
+        response = await (
+            query.order("created_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
+        self._raise_on_error(response)
+        rows = self._list(response)
+
+        note_ids = [str(row.get("id")) for row in rows if row.get("id")]
+        labels_by_note = await self._labels_for_notes(note_ids)
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            source = row.get("sources") or {}
+            if isinstance(source, list):
+                source = source[0] if source else {}
+            details = row.get("voice_note_details") or {}
+            if isinstance(details, list):
+                details = details[0] if details else {}
+            labels = labels_by_note.get(str(row.get("id")), [])
+            item = dict(row)
+            item.pop("voice_note_labels", None)
+            item["details"] = details
+            item["labels"] = labels
+            item["source"] = source
+            item["display_title"] = details.get("title") or "Untitled note"
+            item["preview"] = (row.get("clean_text") or row.get("raw_text") or "")[:280]
+            items.append(item)
+        return items
+
+    async def get_web_note(self, note_id: str) -> Optional[dict[str, Any]]:
+        notes = await self.list_web_notes(offset=0, limit=10000)
+        return next((note for note in notes if str(note.get("id")) == note_id), None)
+
+    async def _labels_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        if not note_ids:
+            return {}
+        response = (
+            await self._client.table("voice_note_labels")
+            .select("voice_note_uuid, labels(id, label)")
+            .in_("voice_note_uuid", note_ids)
+            .is_("deleted_at", "null")
+            .execute()
+        )
+        self._raise_on_error(response)
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in self._list(response):
+            label = row.get("labels")
+            note_id = row.get("voice_note_uuid")
+            if note_id and isinstance(label, dict):
+                grouped.setdefault(str(note_id), []).append(label)
+        for labels in grouped.values():
+            labels.sort(key=lambda label: str(label.get("label") or ""))
+        return grouped
+
     @staticmethod
     def _raise_on_error(response: Any, allow_none_response: bool = False) -> None:
         if response is not None and hasattr(response, "error") and response.error:

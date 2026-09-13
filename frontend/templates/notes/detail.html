@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ note.display_title }} · Notes{% endblock %}
+{% block content %}
+<a class="back-link" href="/notes">← Back to notes</a>
+<article class="detail-layout">
+  <header><p class="eyebrow">{{ note.source.source_name or 'Unknown source' }}</p><h1>{{ note.display_title }}</h1><div class="detail-meta"><span>{{ (note.created_at or '')[:10] }}</span><span class="status-chip">{{ note.details.status or 'created' }}</span></div><div class="chips">{% for label in note.labels %}<span class="chip">{{ label.label }}</span>{% endfor %}</div></header>
+  {% if note.clean_text %}<section><h2>Processed text</h2><div class="prose raw-copy">{{ note.clean_text }}</div></section>{% endif %}
+  <section><h2>Raw transcription</h2><div class="prose raw-copy">{{ note.raw_text or 'No transcription available.' }}</div></section>
+  <dl class="metadata"><div><dt>Message ID</dt><dd>{{ note.message_id or '—' }}</dd></div><div><dt>Duration</dt><dd>{{ note.duration_seconds or '—' }}{% if note.duration_seconds %} seconds{% endif %}</dd></div></dl>
+</article>
+{% endblock %}

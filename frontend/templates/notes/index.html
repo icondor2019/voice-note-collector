@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Notes · Voice Note Collector{% endblock %}
+{% block content %}
+<header class="page-heading"><p class="eyebrow">Raw material</p><h1>Notes</h1><p class="lede">Trace the ideas and observations you captured.</p></header>
+{% with action='/notes', statuses=['created', 'enriched', 'reviewed'] %}{% include "components/filters.html" %}{% endwith %}
+<section id="notes-grid" class="card-grid" aria-live="polite">{% include "notes/_cards.html" %}</section>
+{% endblock %}

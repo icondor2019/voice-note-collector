@@ -87,6 +87,18 @@ class SourcesRepository:
         self._raise_on_error(response)
         return self._list(response)
 
+    async def get_web_statistics(self) -> dict[str, int]:
+        """Return source totals used by the web dashboard."""
+        response = await self._client.table(self._table).select("id, usage_status").execute()
+        self._raise_on_error(response)
+        rows = self._list(response)
+        archived = sum(1 for row in rows if row.get("usage_status") == "archive")
+        return {
+            "total": len(rows),
+            "active": len(rows) - archived,
+            "archived": archived,
+        }
+
     async def set_usage_status(
         self, source_id: str, usage_status: str
     ) -> Optional[dict[str, Any]]:

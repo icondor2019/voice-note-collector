@@ -214,3 +214,11 @@ tmp/
 closed_features/
 # Graphify knowledge graph: generated locally, intentionally untracked but used by agents
 graphify-out/
+
+# Impeccable: local-only skill, agents, command, engine, and detector hook
+.agents/skills/impeccable/
+.claude/agents/impeccable-*.md
+.claude/skills/impeccable/
+.claude/settings.local.json
+.opencode/commands/impeccable.md
+.opencode/skills/impeccable/

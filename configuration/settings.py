@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # Supabase
     SUPABASE_URL: Optional[str] = None
     SUPABASE_KEY: Optional[str] = None
+    SUPABASE_ANON_KEY: Optional[str] = None
 
     # JWT
     SECRET_KEY: str
@@ -61,6 +62,12 @@ class Settings(BaseSettings):
 
     # Security
     API_KEY: Optional[str] = None
+    WEB_ALLOWED_EMAIL: Optional[str] = None
+    WEB_COOKIE_SECURE: Optional[bool] = None
+    # Explicit local-only bypass for inspecting the web UI without Supabase.
+    # Temporary UI-preview default for non-production environments. The
+    # service still enforces a production guard before honoring this flag.
+    WEB_AUTH_DISABLED: bool = False
 
     # GROQ
     GROQ_API_KEY: Optional[str] = None
@@ -111,6 +118,8 @@ class Settings(BaseSettings):
                 [
                     "TELEGRAM_WEBHOOK_SECRET",
                     "API_KEY",
+                    "SUPABASE_ANON_KEY",
+                    "WEB_ALLOWED_EMAIL",
                 ]
             )
 

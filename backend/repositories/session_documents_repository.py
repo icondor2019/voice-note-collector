@@ -5,6 +5,9 @@ from typing import Any, Optional, cast
 
 from backend.repositories.repository_errors import RepositoryError
 
+LABEL_ASSOCIATION_PAGE_SIZE = 1000
+NOTE_ID_FILTER_BATCH_SIZE = 500
+
 
 class SessionDocumentsRepository:
     def __init__(self, client: Any) -> None:
@@ -80,6 +83,171 @@ class SessionDocumentsRepository:
         response = await query.execute()
         self._raise_on_error(response)
         return self._list(response)
+
+    async def count_documents(self) -> int:
+        response = await self._client.table(self._table).select("id", count="exact").execute()
+        self._raise_on_error(response)
+        count = getattr(response, "count", None)
+        return int(count) if count is not None else len(self._list(response))
+
+    async def list_web_documents(
+        self,
+        *,
+        source_id: Optional[str] = None,
+        source_type: Optional[str] = None,
+        source_author: Optional[str] = None,
+        source_usage_status: Optional[str] = None,
+        status: Optional[str] = None,
+        label_ids: Optional[list[int]] = None,
+        offset: int = 0,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        query = self._client.table(self._table).select(
+            "*, sources!inner(id, source_name, type, author, usage_status)"
+        )
+        if source_id:
+            query = query.eq("source_id", source_id)
+        if source_type:
+            query = query.eq("sources.type", source_type)
+        if source_author:
+            query = query.eq("sources.author", source_author)
+        if source_usage_status:
+            query = query.eq("sources.usage_status", source_usage_status)
+        if status:
+            query = query.eq("status", status)
+        if label_ids:
+            document_ids = await self._document_ids_for_labels(label_ids)
+            if not document_ids:
+                return []
+            query = query.in_("id", document_ids)
+        response = await (
+            query.order("created_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
+        self._raise_on_error(response)
+        rows = self._list(response)
+        frequencies = await self.get_label_frequencies_for_documents(
+            [str(row["id"]) for row in rows if row.get("id")]
+        )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            source = row.get("sources") or {}
+            if isinstance(source, list):
+                source = source[0] if source else {}
+            labels = frequencies.get(str(row.get("id")), [])
+            item = dict(row)
+            item["source"] = source
+            item["labels"] = labels
+            item["preview"] = (row.get("content") or "").replace("#", "").strip()[:220]
+            items.append(item)
+        return items
+
+    async def _document_ids_for_labels(self, label_ids: list[int]) -> list[str]:
+        """Resolve documents containing a note with any selected active label."""
+        note_ids: set[str] = set()
+        offset = 0
+        while True:
+            associations_response = (
+                await self._client.table("voice_note_labels")
+                .select("id, voice_note_uuid")
+                .in_("label_id", label_ids)
+                .is_("deleted_at", "null")
+                .order("voice_note_uuid")
+                .order("id")
+                .range(offset, offset + LABEL_ASSOCIATION_PAGE_SIZE - 1)
+                .execute()
+            )
+            self._raise_on_error(associations_response)
+            rows = self._list(associations_response)
+            note_ids.update(
+                str(row["voice_note_uuid"])
+                for row in rows
+                if row.get("voice_note_uuid")
+            )
+            if len(rows) < LABEL_ASSOCIATION_PAGE_SIZE:
+                break
+            offset += LABEL_ASSOCIATION_PAGE_SIZE
+
+        if not note_ids:
+            return []
+
+        document_ids: set[str] = set()
+        sorted_note_ids = sorted(note_ids)
+        for start in range(0, len(sorted_note_ids), NOTE_ID_FILTER_BATCH_SIZE):
+            details_response = (
+                await self._client.table("voice_note_details")
+                .select("document_uuid")
+                .in_("voice_note_uuid", sorted_note_ids[start : start + NOTE_ID_FILTER_BATCH_SIZE])
+                .execute()
+            )
+            self._raise_on_error(details_response)
+            document_ids.update(
+                str(row["document_uuid"])
+                for row in self._list(details_response)
+                if row.get("document_uuid")
+            )
+        return sorted(document_ids)
+
+    async def get_web_document(self, document_id: str) -> Optional[dict[str, Any]]:
+        response = (
+            await self._client.table(self._table)
+            .select("*, sources(id, source_name, type, author, usage_status)")
+            .eq("id", document_id)
+            .maybe_single()
+            .execute()
+        )
+        self._raise_on_error(response, allow_none_response=True)
+        document = self._single(response)
+        if not document:
+            return None
+        item = dict(document)
+        item["source"] = item.get("sources") or {}
+        item["labels"] = (await self.get_label_frequencies_for_documents([document_id])).get(document_id, [])
+        return item
+
+    async def get_label_frequencies_for_documents(
+        self, document_ids: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not document_ids:
+            return {}
+        details_response = (
+            await self._client.table("voice_note_details")
+            .select("voice_note_uuid, document_uuid")
+            .in_("document_uuid", document_ids)
+            .execute()
+        )
+        self._raise_on_error(details_response)
+        note_to_document = {
+            str(row["voice_note_uuid"]): str(row["document_uuid"])
+            for row in self._list(details_response)
+            if row.get("voice_note_uuid") and row.get("document_uuid")
+        }
+        if not note_to_document:
+            return {}
+        labels_response = (
+            await self._client.table("voice_note_labels")
+            .select("voice_note_uuid, labels(id, label)")
+            .in_("voice_note_uuid", list(note_to_document))
+            .is_("deleted_at", "null")
+            .execute()
+        )
+        self._raise_on_error(labels_response)
+        counts: dict[str, dict[int, dict[str, Any]]] = {}
+        for row in self._list(labels_response):
+            document_id = note_to_document.get(str(row.get("voice_note_uuid")))
+            label = row.get("labels")
+            if not document_id or not isinstance(label, dict) or label.get("id") is None:
+                continue
+            label_id = int(label["id"])
+            entry = counts.setdefault(document_id, {}).setdefault(
+                label_id, {"id": label_id, "label": label.get("label") or "", "count": 0}
+            )
+            entry["count"] += 1
+        return {
+            document_id: sorted(values.values(), key=lambda value: (-value["count"], value["label"]))
+            for document_id, values in counts.items()
+        }
 
     async def get_document_labels(self, document_id: str) -> list[dict[str, Any]]:
         """Compute-on-read: return distinct active labels for all notes attached to this document."""
