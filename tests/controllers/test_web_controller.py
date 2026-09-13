@@ -108,6 +108,18 @@ class PaginatedNotes(StubNotes):
         ]
 
 
+class PaginatedDocuments(StubDocuments):
+    async def list_documents(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": f"d{index}", "source": {"source_name": "A source"},
+                "created_at": "2026-09-10T10:00:00Z", "title": f"Document {index}",
+                "preview": "Structured ideas", "status": "ready", "labels": [],
+            }
+            for index in range(25)
+        ]
+
+
 @pytest.fixture(autouse=True)
 def web_overrides() -> Any:
     label_ranking_cache.clear()
@@ -228,6 +240,8 @@ class TestWebPages:
         )
 
         markup = html.unescape(response.text)
+        assert 'hx-get="/notes?' in markup
+        assert 'hx-get="http' not in markup
         assert "offset=24" in markup
         assert "source_id=s1" in markup
         assert "source_type=video" in markup
@@ -235,6 +249,28 @@ class TestWebPages:
         assert "source_usage_status=active" in markup
         assert "status=enriched" in markup
         assert "label_id=1&label_id=2" in markup
+
+    def test_documents_load_more_uses_relative_url_and_preserves_filters(self) -> None:
+        app.dependency_overrides[get_session_document_service] = lambda: PaginatedDocuments()
+        response = authenticated_client().get(
+            "/documents?source_id=s1&source_type=video&status=ready&label_id=1&label_id=2"
+        )
+
+        markup = html.unescape(response.text)
+        assert 'hx-get="/documents?' in markup
+        assert 'hx-get="http' not in markup
+        assert "offset=24" in markup
+        assert "source_id=s1" in markup
+        assert "source_type=video" in markup
+        assert "status=ready" in markup
+        assert "label_id=1&label_id=2" in markup
+
+    def test_load_more_replaces_existing_offset_without_creating_duplicate(self) -> None:
+        app.dependency_overrides[get_voice_note_service] = lambda: PaginatedNotes()
+        response = authenticated_client().get("/notes?offset=48&label_id=1&label_id=2")
+
+        markup = html.unescape(response.text)
+        assert 'hx-get="/notes?offset=72&label_id=1&label_id=2"' in markup
 
     def test_note_detail_404(self) -> None:
         assert authenticated_client().get("/notes/missing").status_code == 404

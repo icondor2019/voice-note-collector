@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -112,6 +113,22 @@ def _source_filter_options(sources: list[dict[str, Any]]) -> list[str]:
     return types
 
 
+def _pagination_url(request: Request, offset: int) -> str:
+    """Build a public-path-relative pagination URL for proxy-safe HTMX requests."""
+    query_items: list[tuple[str, str]] = []
+    offset_replaced = False
+    for key, value in request.query_params.multi_items():
+        if key == "offset":
+            if not offset_replaced:
+                query_items.append((key, str(offset)))
+                offset_replaced = True
+            continue
+        query_items.append((key, value))
+    if not offset_replaced:
+        query_items.append(("offset", str(offset)))
+    return f"{request.url.path}?{urlencode(query_items)}"
+
+
 def _template(request: Request, name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
     rendered = templates.TemplateResponse(
         request=request, name=name, context=context, status_code=status_code
@@ -212,7 +229,7 @@ async def notes(
     except (RepositoryError, SupabaseConfigError) as exc:
         raise HTTPException(status_code=503, detail="Library unavailable") from exc
     has_more = len(rows) > PAGE_SIZE
-    next_url = str(request.url.include_query_params(offset=offset + PAGE_SIZE)) if has_more else None
+    next_url = _pagination_url(request, offset + PAGE_SIZE) if has_more else None
     source_types = _source_filter_options(source_options)
     filters = {
         "source_id": source_id or "", "source_type": source_type or "",
@@ -296,7 +313,7 @@ async def documents(
     except (RepositoryError, SupabaseConfigError) as exc:
         raise HTTPException(status_code=503, detail="Library unavailable") from exc
     has_more = len(rows) > PAGE_SIZE
-    next_url = str(request.url.include_query_params(offset=offset + PAGE_SIZE)) if has_more else None
+    next_url = _pagination_url(request, offset + PAGE_SIZE) if has_more else None
     source_types = _source_filter_options(source_options)
     filters = {
         "source_id": source_id or "", "source_type": source_type or "",
