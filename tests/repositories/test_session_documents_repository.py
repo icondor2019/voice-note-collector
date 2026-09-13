@@ -337,6 +337,7 @@ class TestSessionDocumentsRepository:
 
         assert client.table_name == "voice_note_details"
         assert client.table_instance.update_payload["document_uuid"] == "doc-1"
+        assert "updated_at" in client.table_instance.update_payload
 
     @pytest.mark.anyio
     async def test_attach_notes_to_document_noop_for_empty_list(self) -> None:

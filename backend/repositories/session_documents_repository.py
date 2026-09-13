@@ -350,7 +350,12 @@ class SessionDocumentsRepository:
 
         response = (
             await self._client.table("voice_note_details")
-            .update({"document_uuid": document_id})
+            .update(
+                {
+                    "document_uuid": document_id,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            )
             .in_("voice_note_uuid", note_ids)
             .execute()
         )

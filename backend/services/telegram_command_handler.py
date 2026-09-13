@@ -22,6 +22,7 @@ from backend.services.reflection_service import (
     ReflectionService,
 )
 from backend.services.session_builder_service import (
+    EnrichmentIncompleteError,
     NoValidNotesError,
     SessionBuilderService,
 )
@@ -475,6 +476,11 @@ class TelegramCommandHandler:
             document = await self._session_builder_service.build(source_id, pending_note_ids)
         except NoValidNotesError:
             return "⚠️ No valid notes remaining."
+        except EnrichmentIncompleteError:
+            return (
+                "⚠️ Enrichment failed for some notes. "
+                "No document was created — please try /build again."
+            )
 
         title = document.get("title") or "Untitled"
         content = document.get("content") or ""

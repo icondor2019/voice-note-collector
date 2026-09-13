@@ -15,6 +15,7 @@ from backend.repositories.voice_note_labels_repository import VoiceNoteLabelsRep
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
 from backend.services.note_enrichment_service import NoteEnrichmentService
 from backend.services.session_builder_service import (
+    EnrichmentIncompleteError,
     NoValidNotesError,
     SessionBuilderService,
 )
@@ -120,6 +121,8 @@ async def create_session_document(
         return document
     except NoValidNotesError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except EnrichmentIncompleteError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @router.get("/{document_id}")
