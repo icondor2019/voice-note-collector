@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Voice Note Collector{% endblock %}
+{% block shell_class %}auth-shell{% endblock %}
+{% block content %}
+<section class="auth-card" aria-labelledby="login-title">
+  <p class="eyebrow">Personal knowledge library</p>
+  <h1 id="login-title">Welcome back.</h1>
+  <p class="lede">Sign in to review your captured notes and generated documents.</p>
+  {% if error %}<div class="error-banner" role="alert">{{ error }}</div>{% endif %}
+  <form action="/login" method="post" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Email<input name="email" type="email" autocomplete="username" required autofocus></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+    <button class="primary-button" type="submit">Sign in</button>
+  </form>
+</section>
+{% endblock %}

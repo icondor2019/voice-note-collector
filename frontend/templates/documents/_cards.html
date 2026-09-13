@@ -1,0 +1,11 @@
+{% for document in documents %}
+<article class="library-card document-card">
+  <div class="card-meta"><span>{{ document.source.source_name or 'Unknown source' }}</span><time>{{ (document.created_at or '')[:10] }}</time></div>
+  <h2><a href="/documents/{{ document.id }}">{{ document.title or 'Untitled document' }}</a></h2>
+  <p>{{ document.preview or 'This document does not have content yet.' }}</p>
+  <div class="card-footer"><span class="status-chip">{{ document.status }}</span><div class="chips">{% for label in document.labels %}<span class="chip">{{ label.label }} · {{ label.count }}</span>{% endfor %}</div></div>
+</article>
+{% else %}
+  {% if not request.headers.get('HX-Request') %}<div class="empty-state"><h2>No documents found.</h2><p>Try clearing one or more filters.</p></div>{% endif %}
+{% endfor %}
+{% if has_more %}<div class="load-more"><button class="secondary-button" hx-get="{{ next_url }}" hx-target="closest .load-more" hx-swap="outerHTML">Load more</button></div>{% endif %}

@@ -51,6 +51,50 @@ class LabelsRepository:
         self._raise_on_error(response)
         return self._list(response)
 
+    async def list_ranked_labels(self) -> list[dict[str, Any]]:
+        """Return active labels ranked by distinct notes carrying each label."""
+        active_labels = await self.list_labels()
+        active_by_id = {
+            int(label["id"]): label
+            for label in active_labels
+            if label.get("id") is not None and label.get("deleted_at") is None
+        }
+        if not active_by_id:
+            return []
+
+        response = (
+            await self._client.table("voice_note_labels")
+            .select("voice_note_uuid, label_id")
+            .is_("deleted_at", "null")
+            .execute()
+        )
+        self._raise_on_error(response)
+        notes_by_label: dict[int, set[str]] = {}
+        for row in self._list(response):
+            label_id = row.get("label_id")
+            note_id = row.get("voice_note_uuid")
+            if label_id is None or not note_id:
+                continue
+            try:
+                label_id = int(label_id)
+            except (TypeError, ValueError):
+                continue
+            if label_id in active_by_id:
+                notes_by_label.setdefault(label_id, set()).add(str(note_id))
+
+        ranked = []
+        for label_id, note_ids in notes_by_label.items():
+            if not note_ids:
+                continue
+            label = active_by_id[label_id]
+            ranked.append({
+                "id": label_id,
+                "label": label.get("label") or "",
+                "count": len(note_ids),
+            })
+        ranked.sort(key=lambda item: (-int(item["count"]), str(item["label"]).casefold()))
+        return ranked
+
     @staticmethod
     def _raise_on_error(response: Any, allow_none_response: bool = False) -> None:
         if response is None:

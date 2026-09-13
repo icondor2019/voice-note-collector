@@ -10,3 +10,7 @@ openai
 langgraph
 langchain-openai
 langchain-core
+jinja2
+python-multipart
+markdown
+bleach

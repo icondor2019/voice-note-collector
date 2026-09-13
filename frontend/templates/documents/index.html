@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Documents · Voice Note Collector{% endblock %}
+{% block content %}
+<header class="page-heading"><p class="eyebrow">Structured knowledge</p><h1>Documents</h1><p class="lede">Read the ideas that have already been synthesized and shaped.</p></header>
+{% with action='/documents', statuses=['ready', 'reviewed'] %}{% include "components/filters.html" %}{% endwith %}
+<section id="documents-grid" class="card-grid" aria-live="polite">{% include "documents/_cards.html" %}</section>
+{% endblock %}

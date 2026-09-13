@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Voice Note Collector{% endblock %}</title>
+  <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/htmx.min.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+  {% if session %}
+  <header class="site-header">
+    <a class="brand" href="/">Voice Note Collector</a>
+    <nav aria-label="Primary navigation">
+      <a href="/" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+      <a href="/notes" {% if active_page == 'notes' %}aria-current="page"{% endif %}>Notes</a>
+      <a href="/documents" {% if active_page == 'documents' %}aria-current="page"{% endif %}>Documents</a>
+    </nav>
+    <form action="/logout" method="post" class="logout-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="text-button" type="submit">Sign out</button>
+    </form>
+  </header>
+  {% endif %}
+  <main class="page-shell {% block shell_class %}{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
