@@ -145,3 +145,8 @@ No changes required. The project specification already includes a read-only web 
 - [2026-09-12 22:24] Agent: Frontend | Status: completed | Added six-metric responsive dashboard, accessible link states, and controller rendering assertions
 - [2026-09-12 22:31] Agent: Tester | Status: completed | Reviewed the repository-service-template contract; added pagination and duplicate-relation coverage; 31 focused tests and 651 full-suite tests passed (14 pre-existing warnings)
 - [2026-09-12 22:34] Agent: Orchestrator | Status: completed | Verified the rendered dashboard at 1440 px, 768 px, and 390 px widths using a local static fixture backed by the production stylesheet; no overflow, hierarchy, or responsive defects found
+- [2026-09-12 22:40] Agent: Frontend | Status: in_progress | Updating listing-card status contrast and source-author metadata
+- [2026-09-12 22:42] Agent: Frontend | Status: completed | Added black status chips, author/fallback metadata, and focused controller rendering coverage
+- [2026-09-12 22:46] Agent: Tester | Status: completed | Validated listing-only status contrast, unchanged label/detail chips, author and Unknown author fallback; focused web tests 16 passed, full suite 652 passed, git diff --check clean
+- [2026-09-12 23:00] Agent: Frontend | Status: completed | Applied black status contrast across listing/detail surfaces, aligned detail date→status metadata with wrapping, matched detail chip sizing, and added controller assertions for detail order/classes
+- [2026-09-12 23:10] Agent: Detail Author | Status: completed | Added source author and Unknown author fallback to note/document detail headers; added focused controller coverage for present and missing authors

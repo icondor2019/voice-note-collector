@@ -1,6 +1,6 @@
 {% for note in notes %}
 <article class="library-card">
-  <div class="card-meta"><span>{{ note.source.source_name or 'Unknown source' }}</span><time>{{ (note.created_at or '')[:10] }}</time></div>
+  <div class="card-meta"><span>{{ note.source.source_name or 'Unknown source' }} · {{ note.source.author or 'Unknown author' }}</span><time>{{ (note.created_at or '')[:10] }}</time></div>
   <h2><a href="/notes/{{ note.id }}">{{ note.display_title }}</a></h2>
   <p>{{ note.preview or 'No transcription available.' }}</p>
   <div class="card-footer"><span class="status-chip">{{ note.details.status or 'created' }}</span><div class="chips">{% for label in note.labels %}<span class="chip">{{ label.label }}</span>{% endfor %}</div></div>

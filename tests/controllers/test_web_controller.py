@@ -69,22 +69,22 @@ class StubLabels:
 
 class StubNotes:
     async def list_web_notes(self, **kwargs: Any) -> list[dict[str, Any]]:
-        return [{"id": "n1", "source": {"source_name": "A source"}, "created_at": "2026-09-10T10:00:00Z", "display_title": "A note", "preview": "Raw idea", "details": {"status": "enriched"}, "labels": [{"id": 1, "label": "architecture"}]}]
+        return [{"id": "n1", "source": {"source_name": "A source", "author": "Note Author"}, "created_at": "2026-09-10T10:00:00Z", "display_title": "A note", "preview": "Raw idea", "details": {"status": "enriched"}, "labels": [{"id": 1, "label": "architecture"}]}]
 
     async def get_web_note(self, note_id: str) -> dict[str, Any] | None:
         if note_id == "missing":
             return None
-        return {"id": note_id, "source": {"source_name": "A source"}, "created_at": "2026-09-10T10:00:00Z", "display_title": "A note", "raw_text": "Raw transcription", "clean_text": None, "details": {"status": "created"}, "labels": [], "message_id": 1, "duration_seconds": 12}
+        return {"id": note_id, "source": {"source_name": "A source", "author": "Note Author"}, "created_at": "2026-09-10T10:00:00Z", "display_title": "A note", "raw_text": "Raw transcription", "clean_text": None, "details": {"status": "created"}, "labels": [], "message_id": 1, "duration_seconds": 12}
 
 
 class StubDocuments:
     async def list_documents(self, **kwargs: Any) -> list[dict[str, Any]]:
-        return [{"id": "d1", "source": {"source_name": "A source"}, "created_at": "2026-09-10T10:00:00Z", "title": "A document", "preview": "Structured ideas", "status": "ready", "labels": [{"id": 1, "label": "architecture", "count": 3}]}]
+        return [{"id": "d1", "source": {"source_name": "A source", "author": "Document Author"}, "created_at": "2026-09-10T10:00:00Z", "title": "A document", "preview": "Structured ideas", "status": "ready", "labels": [{"id": 1, "label": "architecture", "count": 3}]}]
 
     async def get_document(self, document_id: str) -> dict[str, Any] | None:
         if document_id == "missing":
             return None
-        return {"id": document_id, "source": {"source_name": "A source"}, "created_at": "2026-09-10T10:00:00Z", "title": "A document", "status": "ready", "labels": [{"id": 1, "label": "architecture", "count": 3}], "rendered_content": "<h2>Summary</h2><p>Safe content</p>"}
+        return {"id": document_id, "source": {"source_name": "A source", "author": "Document Author"}, "created_at": "2026-09-10T10:00:00Z", "title": "A document", "status": "ready", "labels": [{"id": 1, "label": "architecture", "count": 3}], "rendered_content": "<h2>Summary</h2><p>Safe content</p>"}
 
 
 class PaginatedNotes(StubNotes):
@@ -179,6 +179,9 @@ class TestWebPages:
         assert response.status_code == 200
         assert "A note" in response.text
         assert "architecture" in response.text
+        assert "A source · Note Author" in response.text
+        assert 'class="status-chip">enriched</span>' in response.text
+        assert 'class="chip">architecture</span>' in response.text
 
     def test_notes_filters_are_unified_and_explicit(self) -> None:
         response = authenticated_client().get(
@@ -223,17 +226,76 @@ class TestWebPages:
     def test_note_detail_404(self) -> None:
         assert authenticated_client().get("/notes/missing").status_code == 404
 
+    def test_note_detail_aligns_status_after_date_and_uses_large_labels(self) -> None:
+        response = authenticated_client().get("/notes/n1")
+        assert response.status_code == 200
+        assert "A source · Note Author" in response.text
+        assert 'class="detail-meta"><span>2026-09-10</span><span class="status-chip">created</span>' in response.text
+        assert 'class="chips large"' in response.text
+
+    def test_note_detail_falls_back_when_source_author_is_missing(self) -> None:
+        class MissingAuthorNotes(StubNotes):
+            async def get_web_note(self, note_id: str) -> dict[str, Any] | None:
+                note = await super().get_web_note(note_id)
+                if note:
+                    note["source"]["author"] = ""
+                return note
+
+        app.dependency_overrides[get_voice_note_service] = lambda: MissingAuthorNotes()
+        response = authenticated_client().get("/notes/n1")
+        assert response.status_code == 200
+        assert "A source · Unknown author" in response.text
+
     def test_documents_are_separate_and_show_frequency(self) -> None:
         response = authenticated_client().get("/documents")
         assert response.status_code == 200
         assert "A document" in response.text
         assert "architecture · 3" in response.text
+        assert "A source · Document Author" in response.text
+        assert 'class="status-chip">ready</span>' in response.text
+
+    def test_library_cards_fall_back_when_source_author_is_missing(self) -> None:
+        class MissingAuthorNotes(StubNotes):
+            async def list_web_notes(self, **kwargs: Any) -> list[dict[str, Any]]:
+                notes = await super().list_web_notes(**kwargs)
+                notes[0]["source"]["author"] = ""
+                return notes
+
+        class MissingAuthorDocuments(StubDocuments):
+            async def list_documents(self, **kwargs: Any) -> list[dict[str, Any]]:
+                documents = await super().list_documents(**kwargs)
+                documents[0]["source"]["author"] = None
+                return documents
+
+        app.dependency_overrides[get_voice_note_service] = lambda: MissingAuthorNotes()
+        notes_response = authenticated_client().get("/notes")
+        app.dependency_overrides[get_session_document_service] = lambda: MissingAuthorDocuments()
+        documents_response = authenticated_client().get("/documents")
+
+        assert "A source · Unknown author" in notes_response.text
+        assert "A source · Unknown author" in documents_response.text
 
     def test_document_detail_has_safe_content_and_audio_placeholder(self) -> None:
         response = authenticated_client().get("/documents/d1")
         assert response.status_code == 200
+        assert "A source · Document Author" in response.text
         assert "Safe content" in response.text
         assert "Coming soon" in response.text
+        assert 'class="detail-meta"><span>2026-09-10</span><span class="status-chip">ready</span>' in response.text
+        assert 'class="chips large"' in response.text
+
+    def test_document_detail_falls_back_when_source_author_is_missing(self) -> None:
+        class MissingAuthorDocuments(StubDocuments):
+            async def get_document(self, document_id: str) -> dict[str, Any] | None:
+                document = await super().get_document(document_id)
+                if document:
+                    document["source"]["author"] = None
+                return document
+
+        app.dependency_overrides[get_session_document_service] = lambda: MissingAuthorDocuments()
+        response = authenticated_client().get("/documents/d1")
+        assert response.status_code == 200
+        assert "A source · Unknown author" in response.text
 
 
 def test_filter_javascript_only_controls_label_visibility() -> None:

@@ -25,3 +25,9 @@
 .metric-card--pending:hover .metric-help{text-decoration-color:currentColor}
 @media(max-width:900px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.metric-grid{grid-template-columns:1fr}.metric-card{min-height:156px;padding:22px}.metric-card strong{margin:24px 0 10px}.metric-card .metric-duration{white-space:normal}}
+.card-meta>span{min-width:0;overflow-wrap:anywhere}
+.library-card .status-chip,.detail-layout .status-chip{background:#111;color:#fff;border-color:#111}
+.detail-meta{justify-content:flex-start;align-items:center;flex-wrap:wrap;gap:10px 14px}
+.detail-meta>span:first-child{min-width:0;overflow-wrap:anywhere}
+.detail-meta .status-chip{font-size:.82rem;padding:6px 11px;white-space:nowrap}
+.detail-meta + .chips{min-width:0}
