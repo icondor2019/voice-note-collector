@@ -3,5 +3,32 @@
 {% block content %}
 <header class="page-heading"><p class="eyebrow">Raw material</p><h1>Notes</h1><p class="lede">Trace the ideas and observations you captured.</p></header>
 {% with action='/notes', statuses=['created', 'enriched', 'reviewed'] %}{% include "components/filters.html" %}{% endwith %}
-<section id="notes-grid" class="card-grid" aria-live="polite">{% include "notes/_cards.html" %}</section>
+<div id="notes-selection" data-note-selection data-csrf-token="{{ csrf_token }}" data-build-endpoint="/notes/build">
+  <section id="selection-toolbar" class="selection-toolbar" aria-label="Note selection" aria-live="polite" hidden>
+    <div>
+      <strong><span data-selection-count>0</span> notes selected</strong>
+      <span class="selection-source" data-selection-source></span>
+      <span class="selection-status" data-selection-status>Select notes to build a document.</span>
+    </div>
+    <div class="selection-actions">
+      <button class="secondary-button" type="button" data-cancel-selection>Cancel</button>
+      <button class="primary-button" type="button" data-open-build disabled>Build</button>
+    </div>
+  </section>
+
+  <dialog id="build-dialog" class="build-dialog" aria-labelledby="build-dialog-title">
+    <form method="dialog">
+      <p class="eyebrow">Create document</p>
+      <h2 id="build-dialog-title">Build from selected notes</h2>
+      <p data-build-summary></p>
+      <p class="build-dialog-error" data-build-error role="alert" hidden></p>
+      <div class="build-dialog-actions">
+        <button class="secondary-button" type="submit" value="cancel" data-cancel-build>Cancel</button>
+        <button class="primary-button" type="button" data-confirm-build>Build document</button>
+      </div>
+    </form>
+  </dialog>
+
+  <section id="notes-grid" class="card-grid" aria-live="polite">{% include "notes/_cards.html" %}</section>
+</div>
 {% endblock %}

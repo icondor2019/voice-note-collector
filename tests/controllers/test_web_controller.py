@@ -10,12 +10,14 @@ from fastapi.testclient import TestClient
 from backend.controllers.web_controller import (
     get_dashboard_service,
     get_labels_repository,
+    get_session_builder_service,
     get_session_document_service,
     get_sources_repository,
     get_voice_note_service,
     get_web_auth_service,
 )
 from backend.services.web_auth_service import WebAuthError, WebSession
+from backend.services.session_builder_service import EnrichmentIncompleteError, NoValidNotesError
 from backend.services.web_library_filters import label_ranking_cache
 from main import app
 
@@ -69,12 +71,12 @@ class StubLabels:
 
 class StubNotes:
     async def list_web_notes(self, **kwargs: Any) -> list[dict[str, Any]]:
-        return [{"id": "n1", "source": {"source_name": "A source", "author": "Note Author"}, "created_at": "2026-09-10T10:00:00Z", "display_title": "A note", "preview": "Raw idea", "details": {"status": "enriched"}, "labels": [{"id": 1, "label": "architecture"}]}]
+        return [{"id": "n1", "source": {"id": "s1", "source_name": "A source", "author": "Note Author"}, "source_id": "s1", "created_at": "2026-09-10T10:00:00Z", "display_title": "A note", "preview": "Raw idea", "details": {"status": "enriched"}, "labels": [{"id": 1, "label": "architecture"}], "build_eligible": True, "build_block_reason": None}]
 
     async def get_web_note(self, note_id: str) -> dict[str, Any] | None:
         if note_id == "missing":
             return None
-        return {"id": note_id, "source": {"source_name": "A source", "author": "Note Author"}, "created_at": "2026-09-10T10:00:00Z", "display_title": "A note", "raw_text": "Raw transcription", "clean_text": None, "details": {"status": "created"}, "labels": [], "message_id": 1, "duration_seconds": 12}
+        return {"id": note_id, "source": {"id": "s1", "source_name": "A source", "author": "Note Author"}, "source_id": "s1", "created_at": "2026-09-10T10:00:00Z", "display_title": "A note", "raw_text": "Raw transcription", "clean_text": None, "details": {"status": "created"}, "labels": [], "message_id": 1, "duration_seconds": 12, "build_eligible": True, "build_block_reason": None}
 
 
 class StubDocuments:
@@ -85,6 +87,13 @@ class StubDocuments:
         if document_id == "missing":
             return None
         return {"id": document_id, "source": {"source_name": "A source", "author": "Document Author"}, "created_at": "2026-09-10T10:00:00Z", "title": "A document", "status": "ready", "labels": [{"id": 1, "label": "architecture", "count": 3}], "rendered_content": "<h2>Summary</h2><p>Safe content</p>"}
+
+
+class StubBuilder:
+    def __init__(self) -> None:
+        from unittest.mock import AsyncMock
+
+        self.build = AsyncMock(return_value={"id": "doc-123"})
 
 
 class PaginatedNotes(StubNotes):
@@ -99,6 +108,18 @@ class PaginatedNotes(StubNotes):
         ]
 
 
+class PaginatedDocuments(StubDocuments):
+    async def list_documents(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": f"d{index}", "source": {"source_name": "A source"},
+                "created_at": "2026-09-10T10:00:00Z", "title": f"Document {index}",
+                "preview": "Structured ideas", "status": "ready", "labels": [],
+            }
+            for index in range(25)
+        ]
+
+
 @pytest.fixture(autouse=True)
 def web_overrides() -> Any:
     label_ranking_cache.clear()
@@ -108,6 +129,7 @@ def web_overrides() -> Any:
     app.dependency_overrides[get_labels_repository] = lambda: StubLabels()
     app.dependency_overrides[get_voice_note_service] = lambda: StubNotes()
     app.dependency_overrides[get_session_document_service] = lambda: StubDocuments()
+    app.dependency_overrides[get_session_builder_service] = lambda: StubBuilder()
     yield
     app.dependency_overrides.clear()
     label_ranking_cache.clear()
@@ -178,6 +200,9 @@ class TestWebPages:
         response = authenticated_client().get("/notes")
         assert response.status_code == 200
         assert "A note" in response.text
+        assert "data-note-selection" in response.text
+        assert 'data-selectable="true"' in response.text
+        assert "Build from selected notes" in response.text
         assert "architecture" in response.text
         assert "A source · Note Author" in response.text
         assert 'class="status-chip">enriched</span>' in response.text
@@ -215,6 +240,8 @@ class TestWebPages:
         )
 
         markup = html.unescape(response.text)
+        assert 'hx-get="/notes?' in markup
+        assert 'hx-get="http' not in markup
         assert "offset=24" in markup
         assert "source_id=s1" in markup
         assert "source_type=video" in markup
@@ -223,8 +250,90 @@ class TestWebPages:
         assert "status=enriched" in markup
         assert "label_id=1&label_id=2" in markup
 
+    def test_documents_load_more_uses_relative_url_and_preserves_filters(self) -> None:
+        app.dependency_overrides[get_session_document_service] = lambda: PaginatedDocuments()
+        response = authenticated_client().get(
+            "/documents?source_id=s1&source_type=video&status=ready&label_id=1&label_id=2"
+        )
+
+        markup = html.unescape(response.text)
+        assert 'hx-get="/documents?' in markup
+        assert 'hx-get="http' not in markup
+        assert "offset=24" in markup
+        assert "source_id=s1" in markup
+        assert "source_type=video" in markup
+        assert "status=ready" in markup
+        assert "label_id=1&label_id=2" in markup
+
+    def test_load_more_replaces_existing_offset_without_creating_duplicate(self) -> None:
+        app.dependency_overrides[get_voice_note_service] = lambda: PaginatedNotes()
+        response = authenticated_client().get("/notes?offset=48&label_id=1&label_id=2")
+
+        markup = html.unescape(response.text)
+        assert 'hx-get="/notes?offset=72&label_id=1&label_id=2"' in markup
+
     def test_note_detail_404(self) -> None:
         assert authenticated_client().get("/notes/missing").status_code == 404
+
+    def test_notes_build_requires_csrf_and_delegates_to_builder(self) -> None:
+        client = authenticated_client()
+        notes_response = client.get("/notes")
+        csrf_token = notes_response.cookies["vnc_csrf_token"]
+        builder = StubBuilder()
+        app.dependency_overrides[get_session_builder_service] = lambda: builder
+
+        response = client.post(
+            "/notes/build",
+            json={"source_id": "a0dcea10-ca65-4314-af78-ce096824aff1", "note_ids": ["b0dcea10-ca65-4314-af78-ce096824aff1"]},
+            headers={"X-CSRF-Token": csrf_token},
+        )
+
+        assert response.status_code == 201
+        assert response.json() == {"document_id": "doc-123", "redirect_url": "/documents/doc-123"}
+        builder.build.assert_awaited_once_with(
+            source_id="a0dcea10-ca65-4314-af78-ce096824aff1",
+            note_ids=["b0dcea10-ca65-4314-af78-ce096824aff1"],
+        )
+
+    def test_notes_build_rejects_invalid_csrf(self) -> None:
+        response = authenticated_client().post(
+            "/notes/build",
+            json={"source_id": "a0dcea10-ca65-4314-af78-ce096824aff1", "note_ids": ["b0dcea10-ca65-4314-af78-ce096824aff1"]},
+            headers={"X-CSRF-Token": "wrong"},
+        )
+        assert response.status_code == 403
+
+    def test_notes_build_requires_web_session(self) -> None:
+        app.dependency_overrides[get_web_auth_service] = lambda: StubAuth(valid=False)
+        response = TestClient(app).post(
+            "/notes/build",
+            json={"source_id": "a0dcea10-ca65-4314-af78-ce096824aff1", "note_ids": ["b0dcea10-ca65-4314-af78-ce096824aff1"]},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login"
+
+    @pytest.mark.parametrize(
+        ("failure", "status_code"),
+        [
+            (NoValidNotesError("No valid notes"), 400),
+            (EnrichmentIncompleteError("Enrichment incomplete"), 503),
+        ],
+    )
+    def test_notes_build_translates_builder_failures(self, failure: Exception, status_code: int) -> None:
+        from unittest.mock import AsyncMock
+
+        builder = StubBuilder()
+        builder.build = AsyncMock(side_effect=failure)
+        app.dependency_overrides[get_session_builder_service] = lambda: builder
+        client = authenticated_client()
+        csrf_token = client.get("/notes").cookies["vnc_csrf_token"]
+        response = client.post(
+            "/notes/build",
+            json={"source_id": "a0dcea10-ca65-4314-af78-ce096824aff1", "note_ids": ["b0dcea10-ca65-4314-af78-ce096824aff1"]},
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == status_code
 
     def test_note_detail_aligns_status_after_date_and_uses_large_labels(self) -> None:
         response = authenticated_client().get("/notes/n1")
@@ -308,4 +417,4 @@ def test_filter_javascript_only_controls_label_visibility() -> None:
     assert 'moreToggle.dataset.hasHiddenSelection' in javascript
     assert "sessionStorage" not in javascript
     assert "form.requestSubmit()" not in javascript
-    assert "addEventListener(\"change\"" not in javascript
+    assert "data-note-checkbox" in javascript

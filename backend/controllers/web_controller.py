@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -13,8 +14,11 @@ from backend.repositories.session_documents_repository import SessionDocumentsRe
 from backend.repositories.sources_repository import SourcesRepository
 from backend.repositories.supabase_client import get_supabase_client
 from backend.repositories.voice_notes_repository import VoiceNotesRepository
+from backend.controllers.session_documents_controller import get_session_builder_service
+from backend.models.session_document import SessionDocumentCreateRequest
 from backend.services.dashboard_service import DashboardService
 from backend.services.session_document_service import SessionDocumentService
+from backend.services.session_builder_service import EnrichmentIncompleteError, NoValidNotesError, SessionBuilderService
 from backend.services.source_service import SourceService
 from backend.services.voice_note_service import VoiceNoteService
 from backend.services.web_auth_service import WebAuthError, WebAuthService, WebSession
@@ -107,6 +111,22 @@ async def _list_ranked_labels(labels_repo: LabelsRepository) -> list[dict[str, A
 def _source_filter_options(sources: list[dict[str, Any]]) -> list[str]:
     types = sorted({str(source.get("type")) for source in sources if source.get("type")})
     return types
+
+
+def _pagination_url(request: Request, offset: int) -> str:
+    """Build a public-path-relative pagination URL for proxy-safe HTMX requests."""
+    query_items: list[tuple[str, str]] = []
+    offset_replaced = False
+    for key, value in request.query_params.multi_items():
+        if key == "offset":
+            if not offset_replaced:
+                query_items.append((key, str(offset)))
+                offset_replaced = True
+            continue
+        query_items.append((key, value))
+    if not offset_replaced:
+        query_items.append(("offset", str(offset)))
+    return f"{request.url.path}?{urlencode(query_items)}"
 
 
 def _template(request: Request, name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
@@ -209,7 +229,7 @@ async def notes(
     except (RepositoryError, SupabaseConfigError) as exc:
         raise HTTPException(status_code=503, detail="Library unavailable") from exc
     has_more = len(rows) > PAGE_SIZE
-    next_url = str(request.url.include_query_params(offset=offset + PAGE_SIZE)) if has_more else None
+    next_url = _pagination_url(request, offset + PAGE_SIZE) if has_more else None
     source_types = _source_filter_options(source_options)
     filters = {
         "source_id": source_id or "", "source_type": source_type or "",
@@ -226,6 +246,30 @@ async def notes(
     }
     template = "notes/_cards.html" if request.headers.get("HX-Request") == "true" else "notes/index.html"
     return _template(request, template, context)
+
+
+@router.post("/notes/build", status_code=201)
+async def build_notes(
+    payload: SessionDocumentCreateRequest,
+    request: Request,
+    csrf_token: Optional[str] = Header(None, alias="X-CSRF-Token"),
+    session: WebSession = Depends(require_web_session),
+    service: SessionBuilderService = Depends(get_session_builder_service),
+) -> dict[str, str]:
+    """Build a session document from notes selected in the web library."""
+    validate_csrf(request, csrf_token)
+    try:
+        document = await service.build(
+            source_id=str(payload.source_id),
+            note_ids=[str(note_id) for note_id in payload.note_ids],
+        )
+    except NoValidNotesError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except EnrichmentIncompleteError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    document_id = str(document["id"])
+    return {"document_id": document_id, "redirect_url": f"/documents/{document_id}"}
 
 
 @router.get("/notes/{note_id}", response_class=HTMLResponse)
@@ -269,7 +313,7 @@ async def documents(
     except (RepositoryError, SupabaseConfigError) as exc:
         raise HTTPException(status_code=503, detail="Library unavailable") from exc
     has_more = len(rows) > PAGE_SIZE
-    next_url = str(request.url.include_query_params(offset=offset + PAGE_SIZE)) if has_more else None
+    next_url = _pagination_url(request, offset + PAGE_SIZE) if has_more else None
     source_types = _source_filter_options(source_options)
     filters = {
         "source_id": source_id or "", "source_type": source_type or "",

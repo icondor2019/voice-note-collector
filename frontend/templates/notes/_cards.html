@@ -1,5 +1,21 @@
 {% for note in notes %}
-<article class="library-card">
+<article class="library-card note-card"
+  data-note-card
+  data-note-id="{{ note.id }}"
+  data-source-id="{{ note.source.id or note.source_id or '' }}"
+  data-source-name="{{ note.source.source_name or 'Unknown source' }}"
+  data-selectable="{{ 'true' if note.build_eligible else 'false' }}">
+  <div class="note-card-tools">
+    {% if note.build_eligible %}
+      <button class="note-select-trigger" type="button" data-select-note>Select</button>
+      <label class="note-checkbox-label">
+        <input type="checkbox" data-note-checkbox aria-label="Select {{ note.display_title }}">
+        <span aria-hidden="true"></span>
+      </label>
+    {% else %}
+      <span class="note-availability">{{ 'In document' if note.build_block_reason == 'in_document' else 'Unavailable' }}</span>
+    {% endif %}
+  </div>
   <div class="card-meta"><span>{{ note.source.source_name or 'Unknown source' }} · {{ note.source.author or 'Unknown author' }}</span><time>{{ (note.created_at or '')[:10] }}</time></div>
   <h2><a href="/notes/{{ note.id }}">{{ note.display_title }}</a></h2>
   <p>{{ note.preview or 'No transcription available.' }}</p>
