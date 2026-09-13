@@ -41,7 +41,14 @@ class StubAuth:
 
 class StubDashboard:
     async def get_summary(self) -> dict[str, Any]:
-        return {"sources": {"total": 3, "active": 2, "archived": 1}, "notes": 14, "documents": 4, "days_since_last_note": 2}
+        return {
+            "sources": {"total": 3, "active": 2, "archived": 1},
+            "notes": 14,
+            "documents": 4,
+            "days_since_last_note": 2,
+            "total_recording_time": "12 h 34 min",
+            "pending_notes": 6,
+        }
 
 
 class StubSources:
@@ -154,6 +161,10 @@ class TestWebPages:
         response = authenticated_client().get("/")
         assert response.status_code == 200
         assert "14" in response.text and "4" in response.text
+        assert "Recording time" in response.text
+        assert "12 h 34 min" in response.text
+        assert "Pending" in response.text and ">6<" in response.text
+        assert 'href="/notes?status=created"' in response.text
         assert "default-src 'self'" in response.headers["content-security-policy"]
         assert response.cookies.get("vnc_csrf_token") in response.text
 

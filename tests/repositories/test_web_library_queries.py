@@ -155,6 +155,80 @@ async def test_web_notes_apply_source_metadata_filters_before_pagination() -> No
 
 
 @pytest.mark.anyio
+async def test_dashboard_recording_statistics_sum_durations_and_created_notes() -> None:
+    client = Client({
+        "voice_notes": [
+            {"id": "n1", "duration_seconds": 43_200, "voice_note_details": {"status": "created"}},
+            {"id": "n2", "duration_seconds": 2_040, "voice_note_details": {"status": "enriched"}},
+            {"id": "n3", "duration_seconds": None, "voice_note_details": [{"status": "created"}]},
+            {"id": "n4", "duration_seconds": 0, "voice_note_details": {"status": "reviewed"}},
+        ]
+    })
+
+    result = await VoiceNotesRepository(client).get_dashboard_recording_statistics()
+
+    assert result == {"total_duration_seconds": 45_240.0, "pending_notes": 2}
+    assert (
+        "voice_notes",
+        "select",
+        "duration_seconds, voice_note_details(status)",
+    ) in client.calls
+
+
+@pytest.mark.anyio
+async def test_dashboard_recording_statistics_ignore_null_durations() -> None:
+    client = Client({
+        "voice_notes": [
+            {"id": "n1", "duration_seconds": None, "voice_note_details": None},
+            {"id": "n2", "duration_seconds": None, "voice_note_details": {"status": "created"}},
+        ]
+    })
+
+    result = await VoiceNotesRepository(client).get_dashboard_recording_statistics()
+
+    assert result == {"total_duration_seconds": 0.0, "pending_notes": 1}
+
+
+@pytest.mark.anyio
+async def test_dashboard_recording_statistics_return_zeros_for_empty_results() -> None:
+    result = await VoiceNotesRepository(Client({})).get_dashboard_recording_statistics()
+
+    assert result == {"total_duration_seconds": 0.0, "pending_notes": 0}
+
+
+@pytest.mark.anyio
+async def test_dashboard_recording_statistics_paginate_without_double_counting_details() -> None:
+    client = Client({
+        "voice_notes": [
+            *[
+                {
+                    "id": f"n{index}",
+                    "duration_seconds": 60,
+                    "voice_note_details": {"status": "enriched"},
+                }
+                for index in range(1_000)
+            ],
+            {
+                "id": "last",
+                "duration_seconds": 120,
+                "voice_note_details": [
+                    {"status": "created"},
+                    {"status": "created"},
+                ],
+            },
+        ]
+    })
+
+    result = await VoiceNotesRepository(client).get_dashboard_recording_statistics()
+
+    assert result == {"total_duration_seconds": 60_120.0, "pending_notes": 1}
+    assert [call for call in client.calls if call[:2] == ("voice_notes", "range")] == [
+        ("voice_notes", "range", (0, 999)),
+        ("voice_notes", "range", (1_000, 1_999)),
+    ]
+
+
+@pytest.mark.anyio
 async def test_web_documents_filter_in_supabase_and_resolve_label_documents() -> None:
     client = Client({
         "session_documents": [

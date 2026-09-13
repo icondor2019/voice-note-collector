@@ -2,11 +2,11 @@
 {% block title %}Dashboard · Voice Note Collector{% endblock %}
 {% block content %}
 <header class="page-heading">
-  <p class="eyebrow">At a glance</p>
   <h1>Your knowledge library.</h1>
   <p class="lede">A quiet overview of what you have captured and shaped.</p>
 </header>
-<section class="metric-grid" aria-label="Library statistics">
+<section class="metric-grid" aria-labelledby="library-statistics-heading">
+  <h2 class="sr-only" id="library-statistics-heading">Library statistics</h2>
   <a class="metric-card" href="/notes">
     <span class="metric-label">Notes</span><strong>{{ summary.notes }}</strong>
     <span class="metric-help">Raw ideas captured</span>
@@ -19,6 +19,16 @@
     <span class="metric-label">Sources</span><strong>{{ summary.sources.total }}</strong>
     <span class="metric-help">{{ summary.sources.active }} active · {{ summary.sources.archived }} archived</span>
   </div>
+  <div class="metric-card metric-card--duration">
+    <span class="metric-label">Recording time</span>
+    <strong class="metric-duration">{{ summary.total_recording_time }}</strong>
+    <span class="metric-help">Across your complete audio library</span>
+  </div>
+  <a class="metric-card metric-card--pending" href="/notes?status=created">
+    <span class="metric-label">Pending</span>
+    <strong>{{ summary.pending_notes }}</strong>
+    <span class="metric-help">Notes waiting to be processed</span>
+  </a>
   <div class="metric-card">
     <span class="metric-label">Last capture</span>
     {% if summary.days_since_last_note is none %}
