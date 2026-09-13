@@ -722,3 +722,45 @@ async def test_build_doc_no_active_source() -> None:
 
     assert "⚠️" in reply
     assert "No active source" in reply
+
+
+@pytest.mark.anyio
+async def test_build_doc_enrichment_incomplete_returns_warning() -> None:
+    """AC8: /build handler on EnrichmentIncompleteError returns warning, no crash."""
+    from backend.services.session_builder_service import (
+        EnrichmentIncompleteError,
+        SessionBuilderService,
+    )
+
+    source_service = AsyncMock()
+    source_service.get_active_source = AsyncMock(
+        return_value={"id": "source-1", "source_name": "my-source"}
+    )
+    bot_client = AsyncMock()
+    labels_repository = AsyncMock()
+    session_builder = AsyncMock(spec=SessionBuilderService)
+    session_builder._session_docs_repo = AsyncMock()
+    session_builder._session_docs_repo.get_pending_note_ids = AsyncMock(
+        return_value=["note-1", "note-2"]
+    )
+    session_builder.build = AsyncMock(
+        side_effect=EnrichmentIncompleteError(
+            "Enrichment incomplete for 1 note(s): note-1"
+        )
+    )
+
+    handler = TelegramCommandHandler(
+        source_service,
+        bot_client,
+        labels_repository,
+        ChatModeService(),
+        AsyncMock(),
+        session_builder_service=session_builder,
+    )
+
+    reply = await handler.handle_text("/build", chat_id=123)
+
+    assert "⚠️" in reply
+    assert "Enrichment failed" in reply
+    assert "No document was created" in reply
+    assert "/build" in reply

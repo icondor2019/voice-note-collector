@@ -20,11 +20,18 @@ class DashboardService:
         self._notes = voice_notes_repository
         self._documents = session_documents_repository
 
+    @staticmethod
+    def format_recording_duration(total_seconds: float | int) -> str:
+        total_minutes = max(0, int(total_seconds)) // 60
+        hours, minutes = divmod(total_minutes, 60)
+        return f"{hours} h {minutes} min"
+
     async def get_summary(self) -> dict[str, Any]:
         source_stats = await self._sources.get_web_statistics()
         note_count = await self._notes.count_voice_notes()
         document_count = await self._documents.count_documents()
         latest = await self._notes.get_latest_note_created_at()
+        recording_stats = await self._notes.get_dashboard_recording_statistics()
         days_since_last_note = None
         if latest:
             parsed = datetime.fromisoformat(latest.replace("Z", "+00:00"))
@@ -39,4 +46,8 @@ class DashboardService:
             "notes": note_count,
             "documents": document_count,
             "days_since_last_note": days_since_last_note,
+            "total_recording_time": self.format_recording_duration(
+                recording_stats["total_duration_seconds"]
+            ),
+            "pending_notes": recording_stats["pending_notes"],
         }

@@ -1,12 +1,38 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Optional
 
 from loguru import logger
 
 from backend.repositories.repository_errors import RepositoryError
 from backend.services import label_utils, note_enrichment_prompt
+
+
+ENRICHMENT_MAX_BATCH_SIZE = 5
+
+
+def split_into_balanced_batches(
+    notes: list[Any], max_batch_size: int = ENRICHMENT_MAX_BATCH_SIZE
+) -> list[list[Any]]:
+    """Split notes into k = ceil(N/max_batch_size) batches whose sizes differ by at most 1.
+
+    Order is preserved. Empty input returns [].
+    """
+    if not notes:
+        return []
+    n = len(notes)
+    k = math.ceil(n / max_batch_size)
+    # r batches of size (q + 1), then (k - r) batches of size q — sizes differ by at most 1
+    q, r = divmod(n, k)
+    batches: list[list[Any]] = []
+    idx = 0
+    for i in range(k):
+        size = q + 1 if i < r else q
+        batches.append(notes[idx : idx + size])
+        idx += size
+    return batches
 
 
 class NoteEnrichmentService:
@@ -121,8 +147,7 @@ class NoteEnrichmentService:
             grouped.setdefault(source_id, []).append(note)
 
         for source_id, notes in grouped.items():
-            for batch_start in range(0, len(notes), 5):
-                notes_batch = notes[batch_start : batch_start + 5]
+            for notes_batch in split_into_balanced_batches(notes):
                 logger.info(
                     "note_enrichment.enrich_specific.batch_start",
                     extra={"source_id": source_id, "batch_size": len(notes_batch)},
@@ -211,10 +236,15 @@ class NoteEnrichmentService:
         if isinstance(parsed, list):
             items = parsed
         elif isinstance(parsed, dict):
-            for value in parsed.values():
-                if isinstance(value, list):
-                    items = value
-                    break
+            if all(
+                key in parsed for key in ("voice_note_uuid", "title", "label_ids")
+            ):
+                items = [parsed]
+            else:
+                for value in parsed.values():
+                    if isinstance(value, list):
+                        items = value
+                        break
 
         if not items:
             logger.warning("note_enrichment.no_items_parsed")

@@ -3,7 +3,7 @@
 {% block content %}
 <a class="back-link" href="/documents">← Back to documents</a>
 <article class="detail-layout document-detail">
-  <header><p class="eyebrow">{{ document.source.source_name or 'Unknown source' }}</p><h1>{{ document.title or 'Untitled document' }}</h1><div class="detail-meta"><span>{{ (document.created_at or '')[:10] }}</span><span class="status-chip">{{ document.status }}</span></div></header>
+  <header><p class="eyebrow">{{ document.source.source_name or 'Unknown source' }} · {{ document.source.author or 'Unknown author' }}</p><h1>{{ document.title or 'Untitled document' }}</h1><div class="detail-meta"><span>{{ (document.created_at or '')[:10] }}</span><span class="status-chip">{{ document.status }}</span></div></header>
   {% if document.labels %}<section class="topic-section"><h2>Topics by frequency</h2><div class="chips large">{% for label in document.labels %}<span class="chip">{{ label.label }} · {{ label.count }}</span>{% endfor %}</div></section>{% endif %}
   <section class="prose markdown-body">{{ document.rendered_content|safe }}</section>
   <section class="audio-placeholder" aria-disabled="true"><div><p class="eyebrow">Audio</p><h2>Listen to this document</h2><p>Audio generation will be available in a future iteration.</p></div><span>Coming soon</span></section>

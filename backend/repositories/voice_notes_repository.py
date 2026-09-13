@@ -7,6 +7,7 @@ from typing import Any, Optional, cast
 from backend.repositories.repository_errors import DuplicateRecordError, RepositoryError
 
 MAX_LOG_TEXT_LENGTH = 200
+DASHBOARD_STATISTICS_PAGE_SIZE = 1000
 
 
 def _truncate_text(text: Optional[str], limit: int = MAX_LOG_TEXT_LENGTH) -> str:
@@ -111,6 +112,50 @@ class VoiceNotesRepository:
         self._raise_on_error(response)
         rows = self._list(response)
         return rows[0].get("created_at") if rows else None
+
+    async def get_dashboard_recording_statistics(self) -> dict[str, float | int]:
+        """Return global recording duration and pending-note totals for the dashboard."""
+        total_duration_seconds = 0.0
+        pending_notes = 0
+        offset = 0
+
+        while True:
+            response = (
+                await self._client.table(self._table)
+                .select("duration_seconds, voice_note_details(status)")
+                .order("id")
+                .range(offset, offset + DASHBOARD_STATISTICS_PAGE_SIZE - 1)
+                .execute()
+            )
+            self._raise_on_error(response)
+            rows = self._list(response)
+
+            for row in rows:
+                duration = row.get("duration_seconds")
+                if duration is not None:
+                    total_duration_seconds += float(duration)
+
+                details = row.get("voice_note_details") or {}
+                if isinstance(details, list):
+                    is_pending = any(
+                        isinstance(detail, dict) and detail.get("status") == "created"
+                        for detail in details
+                    )
+                else:
+                    is_pending = (
+                        isinstance(details, dict) and details.get("status") == "created"
+                    )
+                if is_pending:
+                    pending_notes += 1
+
+            if len(rows) < DASHBOARD_STATISTICS_PAGE_SIZE:
+                break
+            offset += DASHBOARD_STATISTICS_PAGE_SIZE
+
+        return {
+            "total_duration_seconds": total_duration_seconds,
+            "pending_notes": pending_notes,
+        }
 
     async def list_web_notes(
         self,

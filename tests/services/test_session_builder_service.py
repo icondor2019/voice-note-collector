@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.services.session_builder_service import (
+    EnrichmentIncompleteError,
     NoValidNotesError,
     SessionBuilderService,
 )
@@ -33,8 +34,15 @@ class _StubOpenAI:
 def _make_service(
     valid_notes: list[dict] | None = None,
     llm_content: str | None = None,
+    post_enrichment_notes: list[dict] | None = None,
 ) -> tuple[SessionBuilderService, AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
-    """Create a SessionBuilderService with mocked dependencies."""
+    """Create a SessionBuilderService with mocked dependencies.
+
+    If post_enrichment_notes is provided, get_valid_note_ids will return:
+      - valid_notes on the first call (initial fetch)
+      - post_enrichment_notes on subsequent calls (validation re-fetches)
+    Otherwise, all calls return valid_notes.
+    """
     session_docs_repo = AsyncMock()
     voice_notes_repo = AsyncMock()
     details_repo = AsyncMock()
@@ -43,7 +51,12 @@ def _make_service(
     if valid_notes is None:
         valid_notes = []
 
-    session_docs_repo.get_valid_note_ids = AsyncMock(return_value=valid_notes)
+    if post_enrichment_notes is not None:
+        session_docs_repo.get_valid_note_ids = AsyncMock(
+            side_effect=[valid_notes, post_enrichment_notes, post_enrichment_notes]
+        )
+    else:
+        session_docs_repo.get_valid_note_ids = AsyncMock(return_value=valid_notes)
     session_docs_repo.create_document = AsyncMock(
         return_value={
             "id": "new-doc-id",
@@ -109,8 +122,18 @@ class TestSessionBuilderServiceBuild:
                 "created_at": "2026-01-01T00:00:00Z",
             },
         ]
+        post_enrichment_notes = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "enriched",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
         service, session_docs_repo, enrichment_service, _, _ = _make_service(
-            valid_notes=valid_notes
+            valid_notes=valid_notes,
+            post_enrichment_notes=post_enrichment_notes,
         )
 
         await service.build("source-1", ["note-1"])
@@ -135,7 +158,26 @@ class TestSessionBuilderServiceBuild:
                 "created_at": "2026-01-01T00:00:00Z",
             },
         ]
-        service, _, enrichment_service, _, _ = _make_service(valid_notes=valid_notes)
+        post_enrichment_notes = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "enriched",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "voice_note_uuid": "note-2",
+                "status": "enriched",
+                "raw_text": "world",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        service, _, enrichment_service, _, _ = _make_service(
+            valid_notes=valid_notes,
+            post_enrichment_notes=post_enrichment_notes,
+        )
 
         await service.build("source-1", ["note-1", "note-2"])
 
@@ -208,8 +250,8 @@ class TestSessionBuilderServiceBuild:
 
         await service.build("source-1", ["note-1", "note-2"])
 
-        # get_valid_note_ids was called with both IDs
-        session_docs_repo.get_valid_note_ids.assert_awaited_once_with(
+        # get_valid_note_ids was called with both IDs (initial fetch)
+        session_docs_repo.get_valid_note_ids.assert_any_await(
             "source-1", ["note-1", "note-2"]
         )
         # But only note-1 was attached (the valid one)
@@ -243,6 +285,172 @@ class TestSessionBuilderServiceBuild:
         assert result["title"] == "Test Title"
         assert result["content"] is not None
         assert "## Summary" in result["content"]
+
+    @pytest.mark.anyio
+    async def test_build_all_enriched_no_retry(self) -> None:
+        """AC1: all notes enriched after first pass → no retry, document created."""
+        valid_notes = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "enriched",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        service, session_docs_repo, enrichment_service, _, _ = _make_service(
+            valid_notes=valid_notes
+        )
+
+        await service.build("source-1", ["note-1"])
+
+        # No enrichment call (already enriched)
+        enrichment_service.enrich_specific_notes.assert_not_awaited()
+        # Document created
+        session_docs_repo.create_document.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_build_retry_then_pass(self) -> None:
+        """AC2: 1 note still 'created' on validation → retried → enriched → document created."""
+        valid_notes = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "created",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "voice_note_uuid": "note-2",
+                "status": "created",
+                "raw_text": "world",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        # After first enrichment: note-1 still 'created', note-2 enriched
+        post_first_enrichment = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "created",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "voice_note_uuid": "note-2",
+                "status": "enriched",
+                "raw_text": "world",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        # After retry: both enriched
+        post_retry = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "enriched",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "voice_note_uuid": "note-2",
+                "status": "enriched",
+                "raw_text": "world",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        service, session_docs_repo, enrichment_service, _, _ = _make_service(
+            valid_notes=valid_notes,
+            post_enrichment_notes=post_first_enrichment,
+        )
+        # Override side_effect to include post_retry as third call
+        session_docs_repo.get_valid_note_ids = AsyncMock(
+            side_effect=[valid_notes, post_first_enrichment, post_retry]
+        )
+
+        await service.build("source-1", ["note-1", "note-2"])
+
+        # enrich_specific_notes called twice: initial + retry
+        assert enrichment_service.enrich_specific_notes.await_count == 2
+        # Second call was with exactly the failed ID
+        second_call_ids = enrichment_service.enrich_specific_notes.await_args_list[1].args[0]
+        assert second_call_ids == ["note-1"]
+        # Document was created
+        session_docs_repo.create_document.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_build_retry_then_abort(self) -> None:
+        """AC3: note still 'created' after retry → raises EnrichmentIncompleteError."""
+        valid_notes = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "created",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        # After first enrichment: still 'created'
+        post_first_enrichment = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "created",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        # After retry: still 'created'
+        post_retry = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "created",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        service, session_docs_repo, enrichment_service, _, _ = _make_service(
+            valid_notes=valid_notes,
+            post_enrichment_notes=post_first_enrichment,
+        )
+        session_docs_repo.get_valid_note_ids = AsyncMock(
+            side_effect=[valid_notes, post_first_enrichment, post_retry]
+        )
+
+        with pytest.raises(EnrichmentIncompleteError) as exc_info:
+            await service.build("source-1", ["note-1"])
+
+        assert "note-1" in str(exc_info.value)
+        # create_document and attach_notes_to_document never called
+        session_docs_repo.create_document.assert_not_awaited()
+        session_docs_repo.attach_notes_to_document.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_build_reviewed_status_passes_validation(self) -> None:
+        """AC4: 'reviewed' status passes validation without retry."""
+        valid_notes = [
+            {
+                "voice_note_uuid": "note-1",
+                "status": "reviewed",
+                "raw_text": "hello",
+                "source_id": "source-1",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+        service, session_docs_repo, enrichment_service, _, _ = _make_service(
+            valid_notes=valid_notes
+        )
+
+        await service.build("source-1", ["note-1"])
+
+        # No enrichment call (reviewed passes)
+        enrichment_service.enrich_specific_notes.assert_not_awaited()
+        # Document created
+        session_docs_repo.create_document.assert_awaited_once()
 
 
 class TestSessionBuilderServicePreview:

@@ -1,6 +1,6 @@
 {% for document in documents %}
 <article class="library-card document-card">
-  <div class="card-meta"><span>{{ document.source.source_name or 'Unknown source' }}</span><time>{{ (document.created_at or '')[:10] }}</time></div>
+  <div class="card-meta"><span>{{ document.source.source_name or 'Unknown source' }} · {{ document.source.author or 'Unknown author' }}</span><time>{{ (document.created_at or '')[:10] }}</time></div>
   <h2><a href="/documents/{{ document.id }}">{{ document.title or 'Untitled document' }}</a></h2>
   <p>{{ document.preview or 'This document does not have content yet.' }}</p>
   <div class="card-footer"><span class="status-chip">{{ document.status }}</span><div class="chips">{% for label in document.labels %}<span class="chip">{{ label.label }} · {{ label.count }}</span>{% endfor %}</div></div>

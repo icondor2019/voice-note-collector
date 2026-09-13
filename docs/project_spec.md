@@ -110,6 +110,7 @@ Main tables:
 * If transcription fails → store note with raw_text = NULL
 * If DB insert fails → retry once, then log
 * System must not crash on single failure
+* If note enrichment is incomplete after one retry → abort session document build with `EnrichmentIncompleteError` (no document created; notes remain pending for re-run)
 
 ---
 
@@ -129,7 +130,7 @@ Main tables:
 | TelegramIngestionService | backend/services/telegram_ingestion_service.py | Orchestrate audio download, transcription, and storage |
 | ChatModeService | backend/services/chat_mode_service.py | Global in-memory flag for note/agent mode toggle |
 | ChatAgentService | backend/services/chat_agent_service.py | LangGraph LLM agent (gpt-4o-mini) with per-user short-term memory (last 5 messages); handles agent-mode messages |
-| NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes |
+| NoteEnrichmentService | backend/services/note_enrichment_service.py | Async enrichment pipeline for stored notes. Balances enrichment batches (max 5 per batch, no batch of 1 for ≥2 notes) and accepts single-object LLM responses |
 | ReflectionService | backend/services/reflection_service.py | Generates reflection questions via LLM, rates user responses (1-10), manages reflection state in Supabase, provides internalization stats via get_reflection_summary() |
 | NoteSelectorService | backend/services/note_selector_service.py | Selects a non-internalized note from a source's recent pool for reflection |
 | MultiAgentService | backend/services/multi_agent_service.py | Unified entry point. Owns a LangGraph `StateGraph` with `supervisor_node` → `chat_node` | `reflect_node` | `source_create_node`. `handle(user_message, telegram_user_id) -> MultiAgentResult` hydrates `pending_reflection` AND `source_create_context` (from `SourceCreateAgent.get_pending_context()`), invokes the graph, returns the reply + outcome. The supervisor routes to `source_create_node` when a pending source creation context exists. |
@@ -140,7 +141,7 @@ Main tables:
 | ScorerAgent | backend/services/agents/scorer_agent.py | Rates a user's answer 1-10 and produces structured bullet-point feedback. Wraps `RATING_PROMPT` (moved verbatim from `ReflectionService`); rating clamped 1-10. Returns `AgentResult(outcome="scored", reply=feedback, updates={rating})`. |
 | HintAgent | backend/services/agents/hint_agent.py | Socratic, bilingual (English or Spanish — language of the note). New `HINT_PROMPT`. Never reveals the answer. Returns `AgentResult(outcome="hinted", reply=socratic_text)`. |
 | TelegramBotClient | backend/services/telegram_bot_client.py | Thin httpx wrapper for the Telegram Bot API. Methods: send_message, send_message_with_inline_keyboard (for reply_markup keyboards), edit_message_text (handles "message is not modified" gracefully), answer_callback_query (dismisses inline button loading indicator). |
-| SessionBuilderService | backend/services/session_builder_service.py | Synthesizes session documents from multiple voice notes. build(source_id, note_ids) enriches un-enriched notes then synthesizes via LLM. preview(source_id, note_ids) returns read-only summary. |
+| SessionBuilderService | backend/services/session_builder_service.py | Synthesizes session documents from multiple voice notes. build(source_id, note_ids) enriches un-enriched notes, validates enrichment completeness before synthesis (retries failed notes once, then raises EnrichmentIncompleteError), then synthesizes via LLM. preview(source_id, note_ids) returns read-only summary. |
 
 ---
 

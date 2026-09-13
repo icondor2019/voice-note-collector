@@ -9,7 +9,10 @@ from backend.controllers.session_documents_controller import (
     get_session_builder_service,
     get_session_documents_repository,
 )
-from backend.services.session_builder_service import NoValidNotesError
+from backend.services.session_builder_service import (
+    EnrichmentIncompleteError,
+    NoValidNotesError,
+)
 from configuration.settings import settings
 from main import app
 
@@ -123,6 +126,30 @@ class TestSessionDocumentsController:
         )
 
         assert response.status_code == 400
+
+    def test_post_create_with_enrichment_incomplete_returns_503(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        builder_service_override: StubSessionBuilderService,
+    ) -> None:
+        monkeypatch.setattr(settings, "API_KEY", "test-key")
+        builder_service_override.build = AsyncMock(
+            side_effect=EnrichmentIncompleteError(
+                "Enrichment incomplete for 1 note(s): note-1"
+            )
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/session-documents",
+            json={
+                "source_id": "a0dcea10-ca65-4314-af78-ce096824aff1",
+                "note_ids": ["b0dcea10-ca65-4314-af78-ce096824aff1"],
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+
+        assert response.status_code == 503
 
     def test_get_session_document_returns_document_with_labels(
         self,

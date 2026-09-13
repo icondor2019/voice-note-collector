@@ -18,6 +18,12 @@ class NoValidNotesError(Exception):
     pass
 
 
+class EnrichmentIncompleteError(Exception):
+    """Raised when one or more notes remain status='created' after enrichment + retry."""
+
+    pass
+
+
 class SessionBuilderService:
     def __init__(
         self,
@@ -35,14 +41,58 @@ class SessionBuilderService:
         self._openai_client = openai_client
         self._settings = settings
 
+    async def _ensure_notes_enriched(
+        self, source_id: str, valid_note_ids: list[str]
+    ) -> None:
+        """Re-fetch note statuses and retry once if any remain 'created'.
+
+        Raises EnrichmentIncompleteError if notes are still 'created' after retry.
+        """
+        fresh_notes = await self._session_docs_repo.get_valid_note_ids(
+            source_id, valid_note_ids
+        )
+        still_created_ids = [
+            n["voice_note_uuid"] for n in fresh_notes if n.get("status") == "created"
+        ]
+        if not still_created_ids:
+            return
+
+        logger.info(
+            "session_builder.enrichment_retry",
+            extra={"failed_ids": still_created_ids, "count": len(still_created_ids)},
+        )
+        await self._enrichment_service.enrich_specific_notes(still_created_ids)
+
+        recheck_notes = await self._session_docs_repo.get_valid_note_ids(
+            source_id, valid_note_ids
+        )
+        still_created_ids = [
+            n["voice_note_uuid"]
+            for n in recheck_notes
+            if n.get("status") == "created"
+        ]
+        if still_created_ids:
+            logger.error(
+                "session_builder.enrichment_incomplete",
+                extra={
+                    "failed_ids": still_created_ids,
+                    "count": len(still_created_ids),
+                },
+            )
+            raise EnrichmentIncompleteError(
+                f"Enrichment incomplete for {len(still_created_ids)} note(s): "
+                f"{', '.join(still_created_ids)}"
+            )
+
     async def build(self, source_id: str, note_ids: list[str]) -> dict[str, Any]:
         """Build a session document from the given note IDs.
 
         1. Validate note_ids
         2. Enrich un-enriched notes
-        3. Synthesize document via LLM
-        4. Attach notes
-        5. Return the document row
+        3. Validate enrichment completeness (retry once on failure)
+        4. Synthesize document via LLM
+        5. Attach notes
+        6. Return the document row
         """
         # Step 1: Validate
         valid_notes = await self._session_docs_repo.get_valid_note_ids(source_id, note_ids)
@@ -74,6 +124,9 @@ class SessionBuilderService:
                 extra={"count": len(un_enriched_ids)},
             )
             await self._enrichment_service.enrich_specific_notes(un_enriched_ids)
+
+        # Step A.1: Validate enrichment completeness (retry once on failure)
+        await self._ensure_notes_enriched(source_id, valid_note_ids)
 
         # Step B: Synthesize
         # B.1: Create document row

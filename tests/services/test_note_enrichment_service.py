@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from backend.services.note_enrichment_service import NoteEnrichmentService
+from backend.services.note_enrichment_service import (
+    ENRICHMENT_MAX_BATCH_SIZE,
+    NoteEnrichmentService,
+    split_into_balanced_batches,
+)
 
 
 def _make_response(content: str) -> Any:
@@ -417,7 +421,7 @@ class TestEnrichSpecificNotes:
         await service.enrich_specific_notes([f"note-{index}" for index in range(6)])
 
         assert service._enrich_batch.await_count == 2
-        assert [len(call.args[0]) for call in service._enrich_batch.await_args_list] == [5, 1]
+        assert [len(call.args[0]) for call in service._enrich_batch.await_args_list] == [3, 3]
 
     @pytest.mark.anyio
     async def test_enrich_specific_notes_enriches_only_given_ids(self) -> None:
@@ -514,3 +518,151 @@ class TestEnrichSpecificNotes:
 
         # No DB calls
         details_repo.get_pending_notes_with_source.assert_not_called()
+
+
+class TestSplitIntoBalancedBatches:
+    def test_empty_input(self) -> None:
+        assert split_into_balanced_batches([]) == []
+
+    def test_single_note(self) -> None:
+        notes = ["n1"]
+        result = split_into_balanced_batches(notes)
+        assert result == [["n1"]]
+
+    def test_two_notes(self) -> None:
+        notes = ["n1", "n2"]
+        result = split_into_balanced_batches(notes)
+        assert result == [["n1", "n2"]]
+
+    def test_four_notes(self) -> None:
+        notes = ["n1", "n2", "n3", "n4"]
+        result = split_into_balanced_batches(notes)
+        assert result == [["n1", "n2", "n3", "n4"]]
+
+    def test_five_notes(self) -> None:
+        notes = ["n1", "n2", "n3", "n4", "n5"]
+        result = split_into_balanced_batches(notes)
+        assert result == [["n1", "n2", "n3", "n4", "n5"]]
+
+    def test_six_notes_splits_3_3(self) -> None:
+        notes = [f"n{i}" for i in range(6)]
+        result = split_into_balanced_batches(notes)
+        assert [len(b) for b in result] == [3, 3]
+        # Order preserved
+        flat = [n for b in result for n in b]
+        assert flat == notes
+
+    def test_seven_notes_splits_4_3(self) -> None:
+        notes = [f"n{i}" for i in range(7)]
+        result = split_into_balanced_batches(notes)
+        assert [len(b) for b in result] == [4, 3]
+        flat = [n for b in result for n in b]
+        assert flat == notes
+
+    def test_eight_notes_splits_4_4(self) -> None:
+        notes = [f"n{i}" for i in range(8)]
+        result = split_into_balanced_batches(notes)
+        assert [len(b) for b in result] == [4, 4]
+
+    def test_nine_notes_splits_5_4(self) -> None:
+        notes = [f"n{i}" for i in range(9)]
+        result = split_into_balanced_batches(notes)
+        assert [len(b) for b in result] == [5, 4]
+
+    def test_ten_notes_splits_5_5(self) -> None:
+        notes = [f"n{i}" for i in range(10)]
+        result = split_into_balanced_batches(notes)
+        assert [len(b) for b in result] == [5, 5]
+
+    def test_eleven_notes_splits_4_4_3(self) -> None:
+        notes = [f"n{i}" for i in range(11)]
+        result = split_into_balanced_batches(notes)
+        assert [len(b) for b in result] == [4, 4, 3]
+
+    def test_twelve_notes_splits_4_4_4(self) -> None:
+        notes = [f"n{i}" for i in range(12)]
+        result = split_into_balanced_batches(notes)
+        assert [len(b) for b in result] == [4, 4, 4]
+
+    def test_no_batch_of_one_when_n_gte_2(self) -> None:
+        for n in range(2, 25):
+            notes = [f"n{i}" for i in range(n)]
+            result = split_into_balanced_batches(notes)
+            for batch in result:
+                assert len(batch) > 1, f"batch of 1 found for N={n}"
+
+    def test_no_batch_exceeds_max(self) -> None:
+        for n in range(1, 25):
+            notes = [f"n{i}" for i in range(n)]
+            result = split_into_balanced_batches(notes)
+            for batch in result:
+                assert len(batch) <= ENRICHMENT_MAX_BATCH_SIZE
+
+    def test_order_preserved(self) -> None:
+        for n in range(1, 25):
+            notes = [f"n{i}" for i in range(n)]
+            result = split_into_balanced_batches(notes)
+            flat = [item for batch in result for item in batch]
+            assert flat == notes
+
+
+class TestEnrichBatchSingleObjectParsing:
+    @pytest.mark.anyio
+    async def test_enrich_batch_parses_single_object_response(self) -> None:
+        """Regression test: top-level single-object JSON response returns 1 result."""
+        details_repo = AsyncMock()
+        details_repo.get_pending_notes_with_source.return_value = [
+            {"voice_note_uuid": "note-1", "source_id": "source-1", "raw_text": "hi"},
+        ]
+        labels_repo = AsyncMock()
+        labels_repo.list_labels.return_value = [{"id": 1, "label": "work"}]
+        note_labels_repo = AsyncMock()
+        # LLM returns a single object (not a list, not a wrapper dict)
+        single_object_response = json.dumps(
+            {
+                "voice_note_uuid": "note-1",
+                "title": "Hello Title",
+                "label_ids": [1],
+            }
+        )
+        openai_client = _StubOpenAI(single_object_response)
+        settings = SimpleNamespace(ENVIRONMENT="dev", MAX_LLM_LABEL_CREATIONS_PER_RUN=20)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
+
+        await service.enrich_specific_notes(["note-1"])
+
+        details_repo.update_enrichment.assert_awaited_once_with("note-1", "Hello Title")
+        note_labels_repo.replace_llm_labels.assert_awaited_once_with("note-1", [1])
+
+    @pytest.mark.anyio
+    async def test_enrich_batch_still_parses_wrapper_dict(self) -> None:
+        """Ensure the existing wrapper-dict heuristic still works (no regression)."""
+        details_repo = AsyncMock()
+        details_repo.get_pending_notes_with_source.return_value = [
+            {"voice_note_uuid": "note-1", "source_id": "source-1", "raw_text": "hi"},
+        ]
+        labels_repo = AsyncMock()
+        labels_repo.list_labels.return_value = [{"id": 1, "label": "work"}]
+        note_labels_repo = AsyncMock()
+        wrapper_response = json.dumps(
+            {
+                "notes": [
+                    {
+                        "voice_note_uuid": "note-1",
+                        "title": "Wrapped Title",
+                        "label_ids": [1],
+                    }
+                ]
+            }
+        )
+        openai_client = _StubOpenAI(wrapper_response)
+        settings = SimpleNamespace(ENVIRONMENT="dev", MAX_LLM_LABEL_CREATIONS_PER_RUN=20)
+        service = NoteEnrichmentService(
+            details_repo, None, labels_repo, note_labels_repo, openai_client, settings
+        )
+
+        await service.enrich_specific_notes(["note-1"])
+
+        details_repo.update_enrichment.assert_awaited_once_with("note-1", "Wrapped Title")
