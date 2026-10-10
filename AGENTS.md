@@ -1,6 +1,10 @@
 # Agent Skills Index
 When working on this project, load the relevant Skill(s) BEFORE writing any code.
 
+## Task Tracking
+Development tasks are managed in Plane under project VNC.
+Pull requests should reference their tasks using `[VNC-XX]`.
+
 ## How to Use
 Check the trigger column to find skills that match your current task
 Load the skill by reading the SKILL.md file at the listed path
