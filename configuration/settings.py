@@ -27,8 +27,10 @@ class Settings(BaseSettings):
 
     # Supabase
     SUPABASE_URL: Optional[str] = None
-    SUPABASE_KEY: Optional[str] = None
-    SUPABASE_ANON_KEY: Optional[str] = None
+    # New API keys: publishable keys are low-privilege; secret keys are
+    # server-only and bypass RLS. Do not use the legacy anon/service_role keys.
+    SUPABASE_PUBLISHABLE_KEY: Optional[str] = None
+    SUPABASE_SECRET_KEY: Optional[str] = None
 
     # JWT
     SECRET_KEY: str
@@ -109,7 +111,8 @@ class Settings(BaseSettings):
 
         required_vars = [
             "SUPABASE_URL",
-            "SUPABASE_KEY",
+            "SUPABASE_PUBLISHABLE_KEY",
+            "SUPABASE_SECRET_KEY",
             "SECRET_KEY",
         ]
 
@@ -118,7 +121,6 @@ class Settings(BaseSettings):
                 [
                     "TELEGRAM_WEBHOOK_SECRET",
                     "API_KEY",
-                    "SUPABASE_ANON_KEY",
                     "WEB_ALLOWED_EMAIL",
                 ]
             )
