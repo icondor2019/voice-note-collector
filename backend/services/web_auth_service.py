@@ -32,12 +32,12 @@ class WebAuthService:
         }
 
     async def _client(self) -> Any:
-        if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
+        if not settings.SUPABASE_URL or not settings.SUPABASE_PUBLISHABLE_KEY:
             raise WebAuthError("Web authentication is not configured")
         options = AsyncClientOptions(auto_refresh_token=False, persist_session=False)
         return await create_async_client(
             settings.SUPABASE_URL,
-            settings.SUPABASE_ANON_KEY,
+            settings.SUPABASE_PUBLISHABLE_KEY,
             options=options,
         )
 
